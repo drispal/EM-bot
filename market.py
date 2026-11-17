@@ -31,6 +31,7 @@ MAX_BUYS = 15
 MAX_MORE_CLICKS = 6
 
 report = []
+state = {"buys": 0}  # compteur d'achats partagé entre toutes les raretés
 
 
 def log(msg):
@@ -191,6 +192,8 @@ def buy_rarity(page, rarity, budget, bought):
     goto(page, path)
     purchases = 0
     for _ in range(MAX_BUYS):
+        if state["buys"] >= MAX_BUYS:
+            break
         more_clicks = 0
         while True:
             listings = collect_listings(page)
@@ -210,11 +213,14 @@ def buy_rarity(page, rarity, budget, bought):
             break
         if DRY_RUN:
             for c in cands:
+                if state["buys"] >= MAX_BUYS:
+                    break
                 if c["price"] <= budget and c["name"] not in bought:
                     log(f"[SIMULATION] Acheter {rarity.upper()} « {c['name']} » à {c['price']} essecoins")
                     budget -= c["price"]
                     bought.add(c["name"])
                     purchases += 1
+                    state["buys"] += 1
             break
         c = cands[0]
         before = balance(page)
@@ -227,13 +233,12 @@ def buy_rarity(page, rarity, budget, bought):
         if before is not None and after is not None and after < before:
             budget = after
             purchases += 1
+            state["buys"] += 1
             bought.add(c["name"])
             log(f"Acheté {rarity.upper()} « {c['name']} » à {before - after} essecoins")
         else:
             log(f"Achat non confirmé pour « {c['name']} » (solde inchangé), ignoré.")
             bought.add(c["name"])
-        if purchases >= MAX_BUYS:
-            break
     return budget, purchases
 
 
