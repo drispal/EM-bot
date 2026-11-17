@@ -115,19 +115,27 @@ def settle(page):
     page.wait_for_timeout(1500)
 
 
-def wait_balance(page, path, before, rising):
-    """Recharge `path` jusqu'à ce que le solde ait changé (le site met quelques
-    secondes à le mettre à jour). Renvoie le dernier solde lu."""
-    after = None
+def history_amounts(page, kind, name):
+    """Montants (signés) des lignes « <kind> · <name> » de l'historique d'essecoins.
+    L'historique est à jour tout de suite, contrairement au solde affiché."""
+    page.goto(BASE + "/market/mine", wait_until="networkidle")
+    page.wait_for_timeout(800)
+    text = page.locator("main").inner_text()
+    pat = rf"{re.escape(kind)} · {re.escape(name)}\s*\n\s*\d{{1,2}}/\d{{1,2}}/\d{{4}}\s*\n\s*([+\-−–]\s*\d+)"
+    out = []
+    for m in re.findall(pat, text):
+        out.append(int(re.sub(r"[^\d]", "", m)) * (-1 if m.strip()[0] in "-−–" else 1))
+    return out
+
+
+def confirm_action(page, kind, name, count_before):
+    """Attend qu'une nouvelle ligne d'historique apparaisse. Renvoie son montant ou None."""
     for _ in range(8):
-        settle(page)
-        goto(page, path)
-        after = balance(page)
-        if before is not None and after is not None and \
-                ((after > before) if rising else (after < before)):
-            return after
+        amounts = history_amounts(page, kind, name)
+        if len(amounts) > count_before:
+            return amounts[0]  # la plus récente est en haut
         page.wait_for_timeout(2000)
-    return after
+    return None
 
 
 def press(locator):
@@ -173,15 +181,24 @@ def recycle_all(page):
                 gain_sim += int(m.group(1)) if m else 0
             break
         it = items[0]
-        before = balance(page)
+        n_before = len(history_amounts(page, "Duplicate recycled", it["name"]))
+        goto(page, "/market/sell")
+        # l'index peut avoir changé : on retrouve la carte par son nom
+        items = [x for x in eligible_recycles(page) if x["name"] == it["name"]]
+        if not items:
+            skipped.add(it["name"])
+            continue
+        it = items[0]
         press(page.locator("main div.grid > div").nth(it["idx"])
               .get_by_role("button", name=re.compile(r"^Recycle \d+")).first)
-        after = wait_balance(page, "/market/sell", before, rising=True)
-        if before is not None and after is not None and after > before:
+        settle(page)
+        gain = confirm_action(page, "Duplicate recycled", it["name"], n_before)
+        goto(page, "/market/sell")
+        if gain is not None and gain > 0:
             done += 1
-            log(f"Recyclé {it['rarity']} « {it['name']} » : +{after - before} essecoins")
+            log(f"Recyclé {it['rarity']} « {it['name']} » : +{gain} essecoins")
         else:
-            log(f"Recyclage non confirmé pour « {it['name']} » (solde inchangé), ignoré.")
+            log(f"Recyclage non confirmé pour « {it['name']} » (pas dans l'historique), ignoré.")
             skipped.add(it["name"])
             state["fail"] += 1
             if state["fail"] >= MAX_FAILS:
@@ -215,6 +232,22 @@ def collect_listings(page):
             info["idx"] = i
             out.append(info)
     return out
+
+
+def locate_listing(page, path, name, limit):
+    """Recharge la liste et retrouve l'annonce « New for you » de cette carte."""
+    goto(page, path)
+    for _ in range(MAX_MORE_CLICKS + 1):
+        cur = [x for x in collect_listings(page)
+               if x["name"] == name and x["is_new"] and x["price"] < limit]
+        if cur:
+            return cur[0]
+        more = page.get_by_role("button", name="Show more listings")
+        if more.count() == 0:
+            return None
+        press(more.first)
+        settle(page)
+    return None
 
 
 def buy_rarity(page, rarity, budget, bought):
@@ -254,19 +287,25 @@ def buy_rarity(page, rarity, budget, bought):
                     state["buys"] += 1
             break
         c = cands[0]
-        before = balance(page)
+        n_before = len(history_amounts(page, "Card bought", c["name"]))
+        name_c = c["name"]
+        c = locate_listing(page, path, name_c, limit)
+        if c is None:
+            bought.add(name_c)  # plus disponible (vendue ou déjà possédée)
+            continue
         press(page.locator(BUY_FORMS).nth(c["idx"]).get_by_role("button", name="Buy", exact=True))
-        after = wait_balance(page, path, before, rising=False)
-        if before is not None and after is not None and after < before:
-            budget = after
+        settle(page)
+        paid = confirm_action(page, "Card bought", c["name"], n_before)
+        bought.add(c["name"])
+        if paid is not None and paid < 0:
+            budget -= -paid
             purchases += 1
             state["buys"] += 1
-            bought.add(c["name"])
-            log(f"Acheté {rarity.upper()} « {c['name']} » à {before - after} essecoins")
+            log(f"Acheté {rarity.upper()} « {c['name']} » à {-paid} essecoins")
         else:
-            log(f"Achat non confirmé pour « {c['name']} » (solde inchangé), ignoré.")
-            bought.add(c["name"])
+            log(f"Achat non confirmé pour « {c['name']} » (pas dans l'historique), ignoré.")
             state["fail"] += 1
+        goto(page, path)
     return budget, purchases
 
 
