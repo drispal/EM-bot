@@ -53,13 +53,16 @@ def is_available(button):
     )
 
 
+BACK_RE = re.compile(r"BOOSTER\s*·\s*\d+\s*CARDS", re.I)  # dos de carte / écran du pack
+
+
 def card_snapshot(page):
     """Texte de la carte affichée (rareté, nom, sous-titre), sur une ligne.
     Renvoie None si l'écran n'affiche pas (encore) une carte."""
     text = page.locator("main").inner_text()
     m = re.search(r"ESSEC MASTERS(.*?)(" + END_MARKERS + r")", text, re.S | re.I)
-    if not m or "Opening" in m.group(1):
-        return None
+    if not m or "Opening" in m.group(1) or BACK_RE.search(m.group(1)):
+        return None  # pas (encore) une carte révélée
     lines = [l.strip() for l in m.group(1).splitlines() if l.strip()]
     # retire la ligne d'initiales (ex. "EE") affichée sur les cartes de personnes
     lines = [l for l in lines if not re.fullmatch(r"[A-Z]{1,3}", l)]
@@ -77,6 +80,17 @@ def wait_for_cards(page):
         }""",
         timeout=30000,
     )
+
+
+def read_card(page):
+    """Révèle la carte courante et la lit ; réessaie tant que c'est le dos."""
+    for _ in range(6):
+        reveal_card(page)
+        snap = card_snapshot(page)
+        if snap:
+            return snap
+        page.wait_for_timeout(1000)
+    return None
 
 
 def click(locator):
@@ -151,8 +165,7 @@ def main():
         previous = None
         try:
             for i in range(1, 4):
-                reveal_card(page)
-                snap = card_snapshot(page)
+                snap = read_card(page)
                 if snap is None:
                     print(f"Carte {i}: non lue")
                     break
@@ -162,8 +175,7 @@ def main():
                     if nxt.count():
                         click(nxt)
                         page.wait_for_timeout(1200)
-                        reveal_card(page)
-                        snap = card_snapshot(page) or snap
+                        snap = read_card(page) or snap
                 cards.append(snap)
                 print(f"Carte {i}: {snap}")
                 previous = snap

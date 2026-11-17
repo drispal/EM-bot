@@ -27,12 +27,11 @@ MAX_PRICE = {"epic": 40, "rare": 25, "common": 15}  # achat si prix < seuil
 BUY_ORDER = ["epic", "rare", "common"]
 
 MAX_RECYCLES = 100  # garde-fous par exécution
-MAX_BUYS = 15
 MAX_MORE_CLICKS = 6
 MAX_FAILS = 3  # actions non confirmées avant d'arrêter
 
 report = []
-state = {"buys": 0, "fail": 0}  # achats (toutes raretés) et échecs de vérification
+state = {"fail": 0}  # échecs de vérification
 
 
 def log(msg):
@@ -255,8 +254,8 @@ def buy_rarity(page, rarity, budget, bought):
     path = f"/market?rarity={rarity}&kind=fixed&sort=price"
     goto(page, path)
     purchases = 0
-    for _ in range(MAX_BUYS):
-        if state["buys"] >= MAX_BUYS or state["fail"] >= MAX_FAILS:
+    while True:  # s'arrête quand plus rien d'achetable (budget, seuil, échecs)
+        if state["fail"] >= MAX_FAILS:
             break
         more_clicks = 0
         while True:
@@ -277,14 +276,11 @@ def buy_rarity(page, rarity, budget, bought):
             break
         if DRY_RUN:
             for c in cands:
-                if state["buys"] >= MAX_BUYS:
-                    break
                 if c["price"] <= budget and c["name"] not in bought:
                     log(f"[SIMULATION] Acheter {rarity.upper()} « {c['name']} » à {c['price']} essecoins")
                     budget -= c["price"]
                     bought.add(c["name"])
                     purchases += 1
-                    state["buys"] += 1
             break
         c = cands[0]
         n_before = len(history_amounts(page, "Card bought", c["name"]))
@@ -300,7 +296,6 @@ def buy_rarity(page, rarity, budget, bought):
         if paid is not None and paid < 0:
             budget -= -paid
             purchases += 1
-            state["buys"] += 1
             log(f"Acheté {rarity.upper()} « {c['name']} » à {-paid} essecoins")
         else:
             log(f"Achat non confirmé pour « {c['name']} » (pas dans l'historique), ignoré.")
