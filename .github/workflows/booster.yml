@@ -24,11 +24,13 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Open booster
+        id: booster
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
         run: python open_booster.py
 
       - name: Market (mode test, lecture seule)
+        if: steps.booster.outputs.opened == 'true'
         continue-on-error: true
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}

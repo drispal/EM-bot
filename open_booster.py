@@ -134,6 +134,10 @@ def main():
 
         click(button)
         print("Clic sur le booster.")
+        out = os.environ.get("GITHUB_OUTPUT")
+        if out:
+            with open(out, "a", encoding="utf-8") as f:
+                f.write("opened=true\n")
         try:
             wait_for_cards(page)
         except Exception:  # noqa: BLE001
