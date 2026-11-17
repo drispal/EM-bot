@@ -60,7 +60,9 @@ def main():
             browser.close()
             return
 
-        button.first.click()
+        # Le booster flotte (animation CSS) : Playwright le juge "pas stable".
+        # force=True saute ce test de stabilité.
+        button.first.click(force=True)
         page.wait_for_timeout(1500)
 
         # Parcourt les 3 cartes
