@@ -29,9 +29,10 @@ BUY_ORDER = ["epic", "rare", "common"]
 MAX_RECYCLES = 100  # garde-fous par exécution
 MAX_BUYS = 15
 MAX_MORE_CLICKS = 6
+MAX_FAILS = 3  # actions non confirmées avant d'arrêter
 
 report = []
-state = {"buys": 0}  # compteur d'achats partagé entre toutes les raretés
+state = {"buys": 0, "fail": 0}  # achats (toutes raretés) et échecs de vérification
 
 
 def log(msg):
@@ -114,6 +115,21 @@ def settle(page):
     page.wait_for_timeout(1500)
 
 
+def wait_balance(page, path, before, rising):
+    """Recharge `path` jusqu'à ce que le solde ait changé (le site met quelques
+    secondes à le mettre à jour). Renvoie le dernier solde lu."""
+    after = None
+    for _ in range(8):
+        settle(page)
+        goto(page, path)
+        after = balance(page)
+        if before is not None and after is not None and \
+                ((after > before) if rising else (after < before)):
+            return after
+        page.wait_for_timeout(2000)
+    return after
+
+
 def press(locator):
     try:
         locator.click(timeout=8000)
@@ -160,26 +176,41 @@ def recycle_all(page):
         before = balance(page)
         press(page.locator("main div.grid > div").nth(it["idx"])
               .get_by_role("button", name=re.compile(r"^Recycle \d+")).first)
-        settle(page)
-        goto(page, "/market/sell")
-        after = balance(page)
+        after = wait_balance(page, "/market/sell", before, rising=True)
         if before is not None and after is not None and after > before:
             done += 1
             log(f"Recyclé {it['rarity']} « {it['name']} » : +{after - before} essecoins")
         else:
             log(f"Recyclage non confirmé pour « {it['name']} » (solde inchangé), ignoré.")
             skipped.add(it["name"])
+            state["fail"] += 1
+            if state["fail"] >= MAX_FAILS:
+                log("Trop d'actions non confirmées : arrêt du marché pour cette exécution.")
+                break
     end = balance(page) if not DRY_RUN else start
     return (start or 0) + gain_sim if DRY_RUN else (end or 0), start, done
 
 
 # ------------------------------------------------------------------ achats
+BUY_FORMS = "main form:has(input[name='listingId']):has(button:text-is('Buy'))"
+
+LISTINGS_JS = """() => [...document.querySelectorAll("main form")]
+  .filter(f => f.querySelector("input[name='listingId']")
+    && [...f.querySelectorAll('button')].some(b => b.innerText.trim() === 'Buy'))
+  .map(f => {
+    let el = f;
+    while (el.parentElement && el.parentElement.tagName !== 'MAIN'
+           && el.parentElement.querySelectorAll("input[name='listingId']").length === 1) {
+      el = el.parentElement;
+    }
+    return el.innerText;
+  })"""
+
+
 def collect_listings(page):
-    tiles = page.locator("main div.grid > div").filter(
-        has=page.locator("input[name='listingId']"))
     out = []
-    for i in range(tiles.count()):
-        info = parse_listing(tiles.nth(i).inner_text())
+    for i, text in enumerate(page.evaluate(LISTINGS_JS)):
+        info = parse_listing(text)
         if info and info["price"] is not None:
             info["idx"] = i
             out.append(info)
@@ -192,7 +223,7 @@ def buy_rarity(page, rarity, budget, bought):
     goto(page, path)
     purchases = 0
     for _ in range(MAX_BUYS):
-        if state["buys"] >= MAX_BUYS:
+        if state["buys"] >= MAX_BUYS or state["fail"] >= MAX_FAILS:
             break
         more_clicks = 0
         while True:
@@ -224,12 +255,8 @@ def buy_rarity(page, rarity, budget, bought):
             break
         c = cands[0]
         before = balance(page)
-        tile = page.locator("main div.grid > div").filter(
-            has=page.locator("input[name='listingId']")).nth(c["idx"])
-        press(tile.get_by_role("button", name="Buy", exact=True))
-        settle(page)
-        goto(page, path)
-        after = balance(page)
+        press(page.locator(BUY_FORMS).nth(c["idx"]).get_by_role("button", name="Buy", exact=True))
+        after = wait_balance(page, path, before, rising=False)
         if before is not None and after is not None and after < before:
             budget = after
             purchases += 1
@@ -239,6 +266,7 @@ def buy_rarity(page, rarity, budget, bought):
         else:
             log(f"Achat non confirmé pour « {c['name']} » (solde inchangé), ignoré.")
             bought.add(c["name"])
+            state["fail"] += 1
     return budget, purchases
 
 
