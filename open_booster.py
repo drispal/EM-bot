@@ -65,14 +65,20 @@ def main():
         button.first.click(force=True)
         page.wait_for_timeout(1500)
 
-        # Parcourt les 3 cartes
+        # Le booster est ouvert (les cartes sont créditées). On parcourt les
+        # 3 cartes pour les afficher dans les logs ; une erreur ici ne doit
+        # pas faire échouer l'exécution.
         for i in range(1, 4):
-            print(f"Carte {i}: {card_snapshot(page)}")
-            nxt = page.get_by_role("button", name=re.compile(r"Next card", re.I))
-            if nxt.count() == 0:
+            try:
+                print(f"Carte {i}: {card_snapshot(page)}")
+                nxt = page.get_by_role("button", name=re.compile(r"Next card", re.I))
+                if nxt.count() == 0:
+                    break
+                nxt.first.click(force=True, timeout=5000)
+                page.wait_for_timeout(1000)
+            except Exception as exc:  # noqa: BLE001
+                print(f"Affichage des cartes interrompu : {type(exc).__name__}")
                 break
-            nxt.first.click()
-            page.wait_for_timeout(1000)
 
         page.wait_for_timeout(1000)
         after = collection_count(page)
