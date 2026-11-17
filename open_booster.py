@@ -15,6 +15,7 @@ import sys
 from playwright.sync_api import sync_playwright
 
 HOME_URL = "https://www.essecmasters.com/home"
+MAX_WAIT_SECONDS = 330  # attend le booster s'il arrive dans moins de 5 min 30
 END_MARKERS = r"Click the card to reveal it|Next card|Your booster|NEXT BOOSTER IN|See my collection"
 
 
@@ -34,6 +35,22 @@ def collection_count(page):
 def timer_text(page):
     m = re.search(r"next booster in\s*(\d+:\d+)", page.inner_text("body"), re.I)
     return m.group(1) if m else None
+
+
+def timer_seconds(page):
+    t = timer_text(page)
+    if not t:
+        return None
+    minutes, seconds = t.split(":")
+    return int(minutes) * 60 + int(seconds)
+
+
+def is_available(button):
+    return (
+        button.count() > 0
+        and button.first.is_enabled()
+        and button.first.get_attribute("aria-disabled") != "true"
+    )
 
 
 def card_snapshot(page):
@@ -98,11 +115,17 @@ def main():
         button = page.get_by_role("button", name="Open the booster")
         page.wait_for_timeout(1000)
 
-        if (
-            button.count() == 0
-            or not button.first.is_enabled()
-            or button.first.get_attribute("aria-disabled") == "true"
-        ):
+        if not is_available(button):
+            remaining = timer_seconds(page)
+            if remaining is not None and remaining <= MAX_WAIT_SECONDS:
+                print(f"Booster dans {remaining}s : j'attends.")
+                page.wait_for_timeout((remaining + 5) * 1000)
+                page.reload(wait_until="networkidle")
+                page.wait_for_timeout(1000)
+                before = collection_count(page)
+                button = page.get_by_role("button", name="Open the booster")
+
+        if not is_available(button):
             msg = f"Pas de booster disponible (prochain dans {timer_text(page) or '?'})."
             print(msg)
             summary(f"## Pas de booster\n{msg}")
