@@ -172,7 +172,12 @@ def main():
         except Exception as exc:  # noqa: BLE001
             print(f"Affichage des cartes interrompu : {type(exc).__name__}")
 
-        page.wait_for_timeout(1000)
+        # Le compteur de la page ne se met à jour qu'après un rechargement.
+        try:
+            page.reload(wait_until="networkidle")
+            page.wait_for_timeout(1000)
+        except Exception:  # noqa: BLE001
+            pass
         after = collection_count(page)
         print(f"Collection : {before} -> {after}")
 
