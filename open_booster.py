@@ -37,14 +37,29 @@ def timer_text(page):
 
 
 def card_snapshot(page):
-    """Texte de la carte affichée (rareté, nom, sous-titre), sur une ligne."""
+    """Texte de la carte affichée (rareté, nom, sous-titre), sur une ligne.
+    Renvoie None si l'écran n'affiche pas (encore) une carte."""
     text = page.locator("main").inner_text()
-    m = re.search(r"ESSEC MASTERS(.*?)(" + END_MARKERS + r"|$)", text, re.S | re.I)
-    block = m.group(1) if m else text
-    lines = [l.strip() for l in block.splitlines() if l.strip()]
+    m = re.search(r"ESSEC MASTERS(.*?)(" + END_MARKERS + r")", text, re.S | re.I)
+    if not m or "Opening" in m.group(1):
+        return None
+    lines = [l.strip() for l in m.group(1).splitlines() if l.strip()]
     # retire la ligne d'initiales (ex. "EE") affichée sur les cartes de personnes
-    lines = [l for l in lines if not re.fullmatch(r"[A-Z]{1,3}", l) or l in ("EPIC",)]
-    return " | ".join(lines)
+    lines = [l for l in lines if not re.fullmatch(r"[A-Z]{1,3}", l)]
+    return " | ".join(lines)[:250] or None
+
+
+def wait_for_cards(page):
+    """Attend la fin de l'écran « Opening… » : une carte (ou son dos) apparaît."""
+    page.wait_for_function(
+        """() => {
+            const t = document.body.innerText;
+            return t.includes('Next card') || t.includes('Click the card to reveal it')
+                || t.includes('Your booster')
+                || !!document.querySelector('button[aria-label="Reveal the card"]');
+        }""",
+        timeout=30000,
+    )
 
 
 def click(locator):
@@ -95,8 +110,13 @@ def main():
             return
 
         click(button)
-        page.wait_for_timeout(1500)
-        print("Booster ouvert.")
+        print("Clic sur le booster.")
+        try:
+            wait_for_cards(page)
+        except Exception:  # noqa: BLE001
+            print("Écran des cartes non détecté ; état de la page :")
+            print(page.locator("main").inner_text()[:300].replace("\n", " | "))
+        page.wait_for_timeout(1000)
 
         # Le booster est ouvert (les cartes sont créditées). On parcourt les
         # 3 cartes pour les afficher ; une erreur ici ne fait pas échouer l'exécution.
@@ -106,6 +126,9 @@ def main():
             for i in range(1, 4):
                 reveal_card(page)
                 snap = card_snapshot(page)
+                if snap is None:
+                    print(f"Carte {i}: non lue")
+                    break
                 if i > 1 and snap == previous:
                     # le passage à la carte suivante n'a pas eu lieu : on réessaie une fois
                     nxt = page.get_by_role("button", name=re.compile(r"Next card", re.I))
@@ -113,7 +136,7 @@ def main():
                         click(nxt)
                         page.wait_for_timeout(1200)
                         reveal_card(page)
-                        snap = card_snapshot(page)
+                        snap = card_snapshot(page) or snap
                 cards.append(snap)
                 print(f"Carte {i}: {snap}")
                 previous = snap
@@ -131,6 +154,8 @@ def main():
         print(f"Collection : {before} -> {after}")
 
         lines = ["## Booster ouvert"]
+        if not cards:
+            lines.append("Booster ouvert, mais les cartes n'ont pas pu être lues (voir les logs).")
         for i, c in enumerate(cards, 1):
             lines.append(f"- **Carte {i}** : {c}")
         if before and after:
