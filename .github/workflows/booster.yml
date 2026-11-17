@@ -27,3 +27,9 @@ jobs:
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
         run: python open_booster.py
+
+      - name: Recon market (lecture seule, temporaire)
+        continue-on-error: true
+        env:
+          ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
+        run: python recon_market.py
