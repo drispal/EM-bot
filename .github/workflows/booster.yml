@@ -10,7 +10,7 @@ concurrency:
 jobs:
   open:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -29,9 +29,11 @@ jobs:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
         run: python open_booster.py
 
-      - name: Market (mode test, lecture seule)
+      - name: Market (recycle duplicates, buy missing cards)
         if: steps.booster.outputs.opened == 'true'
         continue-on-error: true
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
-        run: python market_bot.py
+          # Simulation tant que la variable MARKET_DRY_RUN n'est pas "false"
+          DRY_RUN: ${{ vars.MARKET_DRY_RUN || 'true' }}
+        run: python market.py
