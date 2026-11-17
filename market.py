@@ -28,10 +28,10 @@ BUY_ORDER = ["epic", "rare", "common"]
 
 MAX_RECYCLES = 100  # garde-fous par exécution
 MAX_MORE_CLICKS = 6
-MAX_FAILS = 3  # actions non confirmées avant d'arrêter
 
 report = []
-state = {"fail": 0}  # échecs de vérification
+state = {"halt": False}  # passe à True si aucune action n'apparaît dans l'historique
+pending = []  # actions cliquées, à vérifier dans l'historique
 
 
 def log(msg):
@@ -117,9 +117,16 @@ def settle(page):
 def history_amounts(page, kind, name):
     """Montants (signés) des lignes « <kind> · <name> » de l'historique d'essecoins.
     L'historique est à jour tout de suite, contrairement au solde affiché."""
+    return amounts_in(history_text(page), kind, name)
+
+
+def history_text(page):
     page.goto(BASE + "/market/mine", wait_until="networkidle")
     page.wait_for_timeout(800)
-    text = page.locator("main").inner_text()
+    return page.locator("main").inner_text()
+
+
+def amounts_in(text, kind, name):
     pat = rf"{re.escape(kind)} · {re.escape(name)}\s*\n\s*\d{{1,2}}/\d{{1,2}}/\d{{4}}\s*\n\s*([+\-−–]\s*\d+)"
     out = []
     for m in re.findall(pat, text):
@@ -135,6 +142,28 @@ def confirm_action(page, kind, name, count_before):
             return amounts[0]  # la plus récente est en haut
         page.wait_for_timeout(2000)
     return None
+
+
+def add_pending(kind, name, n_before):
+    pending.append({"kind": kind, "name": name, "n_before": n_before, "confirmed": False})
+
+
+def check_pending(page):
+    """Relit l'historique une fois et marque les actions devenues visibles."""
+    text = history_text(page)
+    for p in pending:
+        if not p["confirmed"] and len(amounts_in(text, p["kind"], p["name"])) > p["n_before"]:
+            p["confirmed"] = True
+    return sum(p["confirmed"] for p in pending)
+
+
+def guard(page):
+    """Le site met parfois du temps à afficher l'historique. Si, après plusieurs actions,
+    aucune n'y est visible, on arrête (les clics ne semblent pas avoir d'effet)."""
+    waiting = [p for p in pending if not p["confirmed"]]
+    if len(waiting) >= 3 and check_pending(page) == 0:
+        log("Aucune des dernières actions n'apparaît dans l'historique : arrêt du marché.")
+        state["halt"] = True
 
 
 def press(locator):
@@ -193,15 +222,19 @@ def recycle_all(page):
         settle(page)
         gain = confirm_action(page, "Duplicate recycled", it["name"], n_before)
         goto(page, "/market/sell")
+        skipped.add(it["name"])  # jamais deux fois la même carte dans un run
+        done += 1
         if gain is not None and gain > 0:
-            done += 1
             log(f"Recyclé {it['rarity']} « {it['name']} » : +{gain} essecoins")
+            add_pending("Duplicate recycled", it["name"], n_before)
+            pending[-1]["confirmed"] = True
         else:
-            log(f"Recyclage non confirmé pour « {it['name']} » (pas dans l'historique), ignoré.")
-            skipped.add(it["name"])
-            state["fail"] += 1
-            if state["fail"] >= MAX_FAILS:
-                log("Trop d'actions non confirmées : arrêt du marché pour cette exécution.")
+            m = re.search(r"\+\s*(\d+)", it["label"])
+            log(f"Recyclage envoyé {it['rarity']} « {it['name']} » (≈ +{m.group(1) if m else '?'} essecoins), "
+                "pas encore visible dans l'historique.")
+            add_pending("Duplicate recycled", it["name"], n_before)
+            guard(page)
+            if state["halt"]:
                 break
     end = balance(page) if not DRY_RUN else start
     return (start or 0) + gain_sim if DRY_RUN else (end or 0), start, done
@@ -255,7 +288,7 @@ def buy_rarity(page, rarity, budget, bought):
     goto(page, path)
     purchases = 0
     while True:  # s'arrête quand plus rien d'achetable (budget, seuil, échecs)
-        if state["fail"] >= MAX_FAILS:
+        if state["halt"]:
             break
         more_clicks = 0
         while True:
@@ -293,13 +326,17 @@ def buy_rarity(page, rarity, budget, bought):
         settle(page)
         paid = confirm_action(page, "Card bought", c["name"], n_before)
         bought.add(c["name"])
+        add_pending("Card bought", c["name"], n_before)
+        purchases += 1
         if paid is not None and paid < 0:
+            pending[-1]["confirmed"] = True
             budget -= -paid
-            purchases += 1
             log(f"Acheté {rarity.upper()} « {c['name']} » à {-paid} essecoins")
         else:
-            log(f"Achat non confirmé pour « {c['name']} » (pas dans l'historique), ignoré.")
-            state["fail"] += 1
+            budget -= c["price"]  # on suppose l'achat passé (prix de l'annonce)
+            log(f"Achat envoyé {rarity.upper()} « {c['name']} » à {c['price']} essecoins, "
+                "pas encore visible dans l'historique.")
+            guard(page)
         goto(page, path)
     return budget, purchases
 
@@ -324,6 +361,17 @@ def main():
             budget, n = buy_rarity(page, rarity, budget, bought)
             total_buys += n
 
+        if pending:  # vérification finale : l'historique peut avoir du retard
+            for attempt in range(4):
+                ok = check_pending(page)
+                if ok == len(pending):
+                    break
+                if attempt < 3:
+                    page.wait_for_timeout(20000)
+            log(f"Vérification finale : {ok}/{len(pending)} action(s) visibles dans l'historique.")
+            for p_ in pending:
+                if not p_["confirmed"]:
+                    log(f"  ⚠ « {p_['name']} » ({p_['kind']}) toujours absent de l'historique.")
         goto(page, "/market")
         final = balance(page)
         log(f"Solde : {start} -> {final} essecoins ({recycled} recyclage(s), {total_buys} achat(s))")
