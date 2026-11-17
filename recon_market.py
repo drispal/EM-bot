@@ -51,20 +51,19 @@ def main():
         hrefs = sorted({a.get_attribute("href") for a in page.locator("a[href^='/']").all() if a.get_attribute("href")})
         print("LIENS DU SITE :", hrefs)
 
-        targets = [h for h in hrefs if "market" in h.lower()] or ["/market"]
+        targets = ["/album"]
         for t in targets[:4]:
             page.goto(BASE + t, wait_until="networkidle")
             page.wait_for_timeout(1500)
             dump(page, f"page {t}")
             # onglets / sous-pages repérés sur cette page (lecture seule : on ne clique pas)
-            subs = sorted(
-                {a.get_attribute("href") for a in page.locator("a[href*='market']").all() if a.get_attribute("href")}
-            )
-            print("SOUS-LIENS MARKET :", subs)
-            for s in [x for x in subs if x != t][:3]:
-                page.goto(BASE + s if s.startswith("/") else s, wait_until="networkidle")
-                page.wait_for_timeout(1500)
-                dump(page, f"sous-page {s}")
+            n = page.get_by_text(re.compile(r"×\s*[2-9]")).count()
+            print("ELEMENTS AVEC ×2 ou plus :", n)
+            for el in page.get_by_text(re.compile(r"×\s*[2-9]")).all()[:8]:
+                try:
+                    print("[dup]", el.evaluate("e => (e.closest('a,li,div')||e).innerText").replace("\n", " | ")[:200])
+                except Exception:  # noqa: BLE001
+                    pass
         browser.close()
 
 
