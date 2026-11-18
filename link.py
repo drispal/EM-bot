@@ -246,18 +246,19 @@ def main_link(page):
 
 
 # ------------------------------------------------------------ côté Joss
-INCOMING_JS = r"""() => [...document.querySelectorAll('main button')]
-  .filter(b => b.innerText.trim() === 'Accept the trade')
-  .map(b => {
-    let el = b;
-    while (el.parentElement && el.parentElement.tagName !== 'MAIN'
-           && ![...el.parentElement.querySelectorAll('button')]
-                .filter(x => x.innerText.trim() === 'Accept the trade').length > 1) {
-      el = el.parentElement;
-      if (/offers you a trade/i.test(el.innerText)) break;
-    }
-    return el.innerText;
-  })"""
+INCOMING_JS = r"""() => {
+  const accepts = r => [...r.querySelectorAll('button')].filter(x => x.innerText.trim() === 'Accept the trade').length;
+  return [...document.querySelectorAll('main button')]
+    .filter(b => b.innerText.trim() === 'Accept the trade')
+    .map(b => {
+      let el = b;
+      while (el.parentElement && el.parentElement.tagName !== 'MAIN' && accepts(el.parentElement) <= 1) {
+        el = el.parentElement;
+        if (/offers you a trade/i.test(el.innerText)) break;
+      }
+      return el.innerText;
+    });
+}"""
 
 
 def parse_incoming(text):

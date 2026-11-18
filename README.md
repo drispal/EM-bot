@@ -94,3 +94,32 @@ toucher aux variables.
   échoué est retenté une fois (booster, marché). La lecture du marché ne s'arrête que si le
   bouton « Show more listings » reste absent et que le nombre d'annonces n'est pas un multiple
   de 24 ; sinon attente de 4 s puis un seul rechargement.
+
+## Compte nourrisseur (Joss)
+
+Un second compte (Joss) ouvre des boosters et alimente le compte principal. Tout est désactivé
+tant que les variables du dépôt ne sont pas posées.
+
+- **Mise en route** : sur ton ordinateur, `python login_local.py storage_state_joss.json`
+  (connecte-toi avec Joss), puis `gh secret set ESSEC_STORAGE_STATE_JOSS < storage_state_joss.json`
+  (ne commit jamais ce fichier). Variables : `FEEDER_ENABLED=true` (lance le job `feeder`),
+  `FEEDER_DRY_RUN` et `LINK_DRY_RUN` (simulation tant qu'elles ne valent pas `false`).
+  Optionnelles : `FEEDER_NAME` (début du nom de Joss vu du principal, défaut `Josserand`),
+  `FEEDER_MAIN_NAME` (regex du nom du principal vu de Joss, défaut `^(Damien|DJ)\b`).
+  Réglages (variables d'environnement de `link.py`) : `BAIT_MIN` (60), `BAIT_MAX` (500).
+- **Job `feeder` (Joss)** : ouvre son booster, accepte les échanges venant du principal,
+  achète l'annonce appât, publie son solde dans `feeder.json` (branche `tracking`), puis
+  vend ou recycle ses doublons (jamais le dernier exemplaire d'une carte ; `FEEDER=true` : il
+  n'achète rien pour lui).
+- **Principal → Joss** (`link.py`, avant le recyclage de chaque passage) :
+  1. un échange à la fois : 1 doublon de peu de valeur (commune, rare ; épique seulement si
+     l'échange rapporte ≥ 16 points) contre jusqu'à 5 cartes de Joss qui te manquent, les plus
+     rentables d'abord (légendaires de Joss comprises) ; abandonné après 25 min sans réponse ;
+  2. une annonce appât : un doublon commun ou rare mis en vente à un prix égal au solde de Joss
+     (au moins `BAIT_MIN`, au plus `BAIT_MAX`) ; Joss l'achète et te transfère ses essecoins.
+     Une nouvelle annonce n'est faite qu'après un solde de Joss publié après la précédente.
+- **Garde-fous** : jamais de légendaire ni de carte Créateur donné ou mis en vente pour Joss
+  (le principal) ; Joss refuse un échange où il recevrait une telle carte, ou plus de 2 cartes ;
+  il n'achète que l'annonce appât du principal (nom, prix et vendeur vérifiés) ; rien n'est
+  proposé si Joss n'a pas publié son solde depuis 30 min ; toute erreur de ce volet est ignorée
+  et ne bloque jamais le marché principal.
