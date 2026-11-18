@@ -12,7 +12,7 @@ import os
 import re
 import sys
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 HOME_URL = "https://www.essecmasters.com/home"
 MAX_WAIT_SECONDS = 330  # attend le booster s'il arrive dans moins de 5 min 30
@@ -25,6 +25,27 @@ def summary(text):
     if path:
         with open(path, "a", encoding="utf-8") as f:
             f.write(text + "\n")
+
+
+def load(page, url=None):
+    """Charge (ou recharge) la page. Le site est parfois lent : « networkidle » n'est plus
+    exigé (10 s au plus) et un chargement échoué est retenté une fois."""
+    for attempt in range(2):
+        try:
+            if url:
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            else:
+                page.reload(wait_until="domcontentloaded", timeout=30000)
+            break
+        except PlaywrightError:
+            if attempt == 1:
+                raise
+            print("Chargement échoué, nouvel essai.")
+            page.wait_for_timeout(2000)
+    try:
+        page.wait_for_load_state("networkidle", timeout=10000)
+    except PlaywrightError:
+        pass
 
 
 def collection_count(page):
@@ -119,7 +140,7 @@ def main():
         browser = p.chromium.launch()
         context = browser.new_context(storage_state=state, locale="en-US")
         page = context.new_page()
-        page.goto(HOME_URL, wait_until="networkidle")
+        load(page, HOME_URL)
 
         if "/login" in page.url:
             summary("## Échec\nSession expirée : relance `login_local.py` et mets à jour le secret.")
@@ -134,7 +155,7 @@ def main():
             if remaining is not None and remaining <= MAX_WAIT_SECONDS:
                 print(f"Booster dans {remaining}s : j'attends.")
                 page.wait_for_timeout((remaining + 5) * 1000)
-                page.reload(wait_until="networkidle")
+                load(page)
                 page.wait_for_timeout(1000)
                 before = collection_count(page)
                 button = page.get_by_role("button", name="Open the booster")
@@ -190,7 +211,7 @@ def main():
 
         # Le compteur de la page ne se met à jour qu'après un rechargement.
         try:
-            page.reload(wait_until="networkidle")
+            load(page)
             page.wait_for_timeout(1000)
         except Exception:  # noqa: BLE001
             pass

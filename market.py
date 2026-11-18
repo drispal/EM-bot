@@ -34,7 +34,7 @@ import sys
 import time
 from urllib.parse import quote
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 BASE = "https://www.essecmasters.com"
 
@@ -56,9 +56,13 @@ POINTS = {"common": 1, "rare": 3, "epic": 8, "legendary": 20}
 MAX_PRICE = {"common": 15, "rare": 25, "epic": 71, "legendary": 151}
 MIN_RATIO = float(os.environ.get("MIN_RATIO", "0.125"))  # points/essecoin minimum
 MIN_RATIO_BY_RARITY = {"epic": 0.11}  # épique : jusqu'à 70 essecoins (8 pts / 70 = 0,114)
-RELAXED_RATIO = float(os.environ.get("RELAXED_RATIO", "0.08"))  # si les essecoins dorment
-IDLE_BALANCE = int(os.environ.get("IDLE_BALANCE", "100"))  # solde à partir duquel on assouplit
-RESERVE = int(os.environ.get("RESERVE", "60"))  # essecoins gardés lors de l'assouplissement
+RELAXED_RATIO = float(os.environ.get("RELAXED_RATIO", "0.08"))  # tout solde : épique <= 100, légendaire <= 250
+IDLE_BALANCE = int(os.environ.get("IDLE_BALANCE", "0"))  # solde à partir duquel on assouplit (0 = toujours)
+RESERVE = int(os.environ.get("RESERVE", "0"))  # essecoins gardés lors de l'assouplissement
+# si les essecoins s'accumulent malgré tout (rien d'achetable), dernier palier : ratio plancher
+FLOOR_RATIO = float(os.environ.get("FLOOR_RATIO", "0.05"))  # épique <= 160, légendaire <= 400
+FLOOR_BALANCE = int(os.environ.get("FLOOR_BALANCE", "200"))
+HOLD_AHEAD = 40  # on attend une meilleure carte si elle est à moins de 40 essecoins (~12 min de revenus)
 # si les essecoins dorment, ces raretés n'ont plus de plafond de prix (seul le ratio compte)
 IDLE_UNCAPPED = {"epic", "legendary"}
 
@@ -75,12 +79,17 @@ def worth(rarity, price, min_ratio=None, idle=False):
 
 
 def acceptable(rarity, price, budget):
-    """Prix acceptable compte tenu du solde : règle normale, ou règle assouplie quand les
-    essecoins dorment (solde >= IDLE_BALANCE, RESERVE essecoins conservés)."""
+    """Prix acceptable compte tenu du solde : règle normale ; règle assouplie (ratio 0,08,
+    épique <= 100) quand le solde le permet ; dernier palier (ratio 0,05) si le solde
+    dépasse FLOOR_BALANCE, pour ne jamais laisser dormir les essecoins."""
+    if price > budget:
+        return False
     if worth(rarity, price):
-        return price <= budget
-    return (budget >= IDLE_BALANCE and budget - price >= RESERVE
-            and worth(rarity, price, RELAXED_RATIO, idle=True))
+        return True
+    if budget >= IDLE_BALANCE and budget - price >= RESERVE \
+            and worth(rarity, price, RELAXED_RATIO, idle=True):
+        return True
+    return budget >= FLOOR_BALANCE and worth(rarity, price, FLOOR_RATIO, idle=True)
 
 
 def price_limits(ratio, idle=False):
@@ -89,6 +98,7 @@ def price_limits(ratio, idle=False):
 
 PRICE_LIMIT = price_limits(None)
 RELAXED_LIMIT = price_limits(RELAXED_RATIO, idle=True)
+FLOOR_LIMIT = price_limits(FLOOR_RATIO, idle=True)
 
 # --- achat-revente : annonces sous la valeur de recyclage -------------------------
 RECYCLE_VALUE = {"common": 5, "rare": 15, "epic": 40}
@@ -99,7 +109,7 @@ MAX_FLIPS = 20  # garde-fou par exécution
 # --- ventes de doublons ----------------------------------------------------------
 SELL_RARITIES = {"RARE", "EPIC"}
 # (prix minimum, prix maximum, prix par défaut) en essecoins ; le recyclage rapporte 15 / 40
-SELL_BOUNDS = {"RARE": (20, 30, 26), "EPIC": (50, 75, 60)}
+SELL_BOUNDS = {"RARE": (20, 30, 26), "EPIC": (50, 62, 60)}
 SELL_TIMEOUT_MIN = int(os.environ.get("SELL_TIMEOUT_MIN", "120"))
 STATE_FILE = os.environ.get("SELL_STATE_FILE", "sell_state.json")
 
@@ -179,8 +189,22 @@ def parse_listing(text):
 
 
 # ------------------------------------------------------------------ pages
-def goto(page, path):
-    page.goto(BASE + path, wait_until="networkidle")
+def goto(page, path, tries=2):
+    """Ouvre une page. Le site est parfois lent : on n'exige plus « networkidle » (attendu
+    10 s au plus) et on réessaie une fois si le chargement échoue."""
+    for attempt in range(tries):
+        try:
+            page.goto(BASE + path, wait_until="domcontentloaded", timeout=30000)
+            break
+        except PlaywrightError:
+            if attempt == tries - 1:
+                raise
+            print(f"Chargement de {path} échoué, nouvel essai.")
+            page.wait_for_timeout(2000)
+    try:
+        page.wait_for_load_state("networkidle", timeout=10000)
+    except PlaywrightError:
+        pass
     if "/login" in page.url:
         report.append("Session expirée : relance login_local.py et mets à jour le secret.")
         write_summary("Marché")
@@ -365,6 +389,13 @@ def scan_sell(page):
 
 def sell_price(it):
     lo, hi, default = SELL_BOUNDS[it["rarity"]]
+    if it["rarity"] == "EPIC":
+        # épique : on se cale sur le dernier prix de vente (il a trouvé preneur), un cran
+        # sous l'annonce la moins chère si elle est plus basse ; plafond 62
+        refs = [it["last_sold"]] if it["last_sold"] else []
+        if it["cheapest"]:
+            refs.append(it["cheapest"] - 1)
+        return max(lo, min(hi, min(refs))) if refs else default
     ref = it["cheapest"] or it["last_sold"]
     if not ref:
         return default
@@ -497,27 +528,57 @@ def show_more(page, more):
         page.wait_for_timeout(1000)
 
 
+PAGE_SIZE = 24  # le site charge les annonces 24 par 24
+
+
 def fetch_listings(page, rarity, limit):
-    """Annonces à prix fixe de cette rareté, des moins chères jusqu'au prix `limit`."""
-    goto(page, market_path(rarity))
-    more_clicks = 0
+    """Annonces à prix fixe de cette rareté, des moins chères jusqu'au prix `limit`.
+    Le bouton « Show more listings » disparaît un instant pendant le chargement : on ne
+    conclut à la fin de la liste que s'il reste absent et que le nombre d'annonces n'est
+    pas un multiple de 24 (sinon : attente, puis un seul rechargement)."""
+    path = market_path(rarity)
+    goto(page, path)
+    try:
+        page.wait_for_selector(BUY_FORMS, timeout=5000)
+    except PlaywrightError:
+        pass  # aucune annonce (ou chargement lent : on réessaiera plus bas)
+    more_clicks = reloads = 0
     while True:
         listings = collect_listings(page)
-        more = page.get_by_role("button", name="Show more listings")
         last_price = listings[-1]["price"] if listings else None
-        if more.count() == 0 or more_clicks >= MAX_MORE_CLICKS \
-                or (last_price is not None and last_price > limit):
+        if more_clicks >= MAX_MORE_CLICKS or (last_price is not None and last_price > limit):
             break
+        more = page.get_by_role("button", name="Show more listings")
+        if more.count() == 0:
+            n = len(listings)
+            if n and n % PAGE_SIZE != 0:
+                break  # nombre « rond » : vraie fin de la liste, inutile d'attendre
+            try:
+                more.first.wait_for(state="visible", timeout=4000)
+            except PlaywrightError:
+                pass
+            if more.count() == 0:
+                if len(collect_listings(page)) > n:
+                    continue  # des annonces sont arrivées entre-temps
+                if reloads < 1:
+                    reloads += 1
+                    print(f"Marché {rarity} : liste coupée à {n} annonce(s), rechargement.")
+                    goto(page, path)
+                    more_clicks = 0
+                    continue
+                break  # fin de la liste (ou site trop lent : on garde ce qui est lu)
         show_more(page, more)
         more_clicks += 1
     return [l for l in listings if l["rarity"].lower() == rarity and l["price"] <= limit]
 
 
-def market_scan(page):
+def market_scan(page, budget=0):
     """Une lecture du marché par rareté (sert à l'achat-revente et aux achats)."""
     out = {}
     for rarity in POINTS:
         limit = max(RELAXED_LIMIT[rarity], PRICE_LIMIT[rarity], FLIP_LIMIT.get(rarity, 0))
+        if budget >= FLOOR_BALANCE:
+            limit = max(limit, FLOOR_LIMIT[rarity])
         out[rarity] = fetch_listings(page, rarity, limit) if limit > 0 else []
         got = out[rarity]
         new = [l for l in got if l["is_new"]]
@@ -635,16 +696,28 @@ def buy_all(page, scan, budget, snapshot, skip=()):
             break
         buy(c)
 
-    # passe 2 : essecoins qui dorment -> ratio assoupli, en gardant RESERVE
-    if not held and budget >= IDLE_BALANCE:
-        p2 = sorted([c for c in cands if c["name"] not in bought
-                     and worth(c["rarity"], c["price"], RELAXED_RATIO, idle=True)], key=key)
-        for c in p2:
+    # passe 2 : ratio assoupli (épique <= 100, légendaire <= 250) pour ne pas stagner. On attend
+    # seulement si une meilleure carte est à moins de HOLD_AHEAD essecoins du solde.
+    def relaxed_pass(ratio, label):
+        nonlocal budget
+        pool = sorted([c for c in cands if c["name"] not in bought
+                       and worth(c["rarity"], c["price"], ratio, idle=True)], key=key)
+        for c in pool:
             if state["halt"]:
                 break
-            if budget - c["price"] < RESERVE:
+            if c["price"] > budget or budget - c["price"] < RESERVE:
+                if 0 < c["price"] - budget <= HOLD_AHEAD:
+                    log(f"Mise de côté ({label}) pour {c['rarity']} « {c['name']} » à "
+                        f"{c['price']} essecoins (solde {budget}).")
+                    break
                 continue
             buy(c)
+
+    if not held and budget >= IDLE_BALANCE:
+        relaxed_pass(RELAXED_RATIO, "ratio assoupli")
+        # passe 3 : le solde s'accumule malgré tout -> ratio plancher
+        if budget >= FLOOR_BALANCE:
+            relaxed_pass(FLOOR_RATIO, "ratio plancher")
     return budget, purchases
 
 
@@ -676,7 +749,7 @@ def main():
 
         purchases = flips = 0
         if budget > 0:
-            scan = market_scan(page)
+            scan = market_scan(page, budget)
             # Les cartes de l'achat-revente suivent ensuite le circuit normal des doublons
             # (le site n'affiche pas tout de suite la carte achetée) : recyclage ou mise en vente.
             budget, flipped = flip_all(page, scan, budget, snapshot)
