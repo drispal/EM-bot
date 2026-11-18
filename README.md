@@ -55,11 +55,11 @@ se terminent dans les 6 minutes).
   5 pour une épique), est achetée (20 par exécution au maximum) ; le doublon est ensuite recyclé ou mis en vente au passage suivant, comme les autres.
 - **Achats** : cartes manquantes (« New for you ») classées par points au classement
   par essecoin (commune 1, rare 3, épique 8, légendaire 20), sous les seuils common < 15,
-  rare < 25, epic ≤ 60, legendary ≤ 150 et avec au moins `MIN_RATIO` = 0,125 point par
-  essecoin. Si une carte intéressante n'est pas encore abordable, le bot met de côté au
+  rare < 25, epic ≤ 70, legendary ≤ 150 et avec au moins `MIN_RATIO` = 0,125 point par
+  essecoin (0,11 pour les épiques). Si une carte intéressante n'est pas encore abordable, le bot met de côté au
   lieu de dépenser pour des cartes moins rentables. Si le solde dépasse `IDLE_BALANCE`
-  (100), le ratio minimum descend à `RELAXED_RATIO` (0,06) en gardant `RESERVE` (60)
-  essecoins, pour ne pas laisser dormir l'argent.
+  (100), le ratio minimum descend à `RELAXED_RATIO` (0,06) et les épiques et légendaires n'ont
+  plus de plafond de prix, en gardant `RESERVE` (60) essecoins, pour ne pas laisser dormir l'argent.
 - **Enchères** : dans la dernière minute, mise minimale autorisée par le site (≈ +5 %)
   sur les cartes manquantes qui passent la même règle de prix ; remise si dépassé (4
   mises max par enchère).

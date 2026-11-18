@@ -15,9 +15,10 @@
 3. Achat : cartes que l'on n'a pas encore (« New for you »), à prix fixe. On vise la
    valeur au classement (commune 1 pt, rare 3, épique 8, légendaire 20) : on achète
    d'abord les meilleurs « points par essecoin », sous les seuils de la rareté
-   (common < 15, rare < 25, epic <= 60, legendary <= 150) et si le ratio est >= MIN_RATIO.
-   Si le solde dépasse IDLE_BALANCE, le ratio minimum est assoupli (RELAXED_RATIO) pour
-   ne pas laisser des essecoins dormir, en gardant toujours RESERVE essecoins.
+   (common < 15, rare < 25, epic <= 70, legendary <= 150) et si le ratio est >= MIN_RATIO.
+   Si le solde dépasse IDLE_BALANCE, le ratio minimum est assoupli (RELAXED_RATIO), et les
+   épiques et légendaires n'ont plus de plafond de prix : mieux vaut les payer cher que de
+   laisser dormir des essecoins. On garde toujours RESERVE essecoins.
    Si une carte intéressante n'est pas encore abordable, on met de côté plutôt que de
    dépenser pour des cartes moins rentables.
 
@@ -51,27 +52,34 @@ RECYCLABLE = {"COMMON", "RARE", "EPIC"}  # on garde LEGENDARY et CREATOR
 
 # --- achats : valeur au classement (points par carte différente) ----------------
 POINTS = {"common": 1, "rare": 3, "epic": 8, "legendary": 20}
-# achat si prix < seuil : common <= 14, rare <= 24, epic <= 60, legendary <= 150
-MAX_PRICE = {"common": 15, "rare": 25, "epic": 61, "legendary": 151}
+# achat normal si prix < seuil : common <= 14, rare <= 24, epic <= 70, legendary <= 150
+MAX_PRICE = {"common": 15, "rare": 25, "epic": 71, "legendary": 151}
 MIN_RATIO = float(os.environ.get("MIN_RATIO", "0.125"))  # points/essecoin minimum
+MIN_RATIO_BY_RARITY = {"epic": 0.11}  # épique : jusqu'à 70 essecoins (8 pts / 70 = 0,114)
 RELAXED_RATIO = float(os.environ.get("RELAXED_RATIO", "0.06"))  # si les essecoins dorment
 IDLE_BALANCE = int(os.environ.get("IDLE_BALANCE", "100"))  # solde à partir duquel on assouplit
 RESERVE = int(os.environ.get("RESERVE", "60"))  # essecoins gardés lors de l'assouplissement
+# si les essecoins dorment, ces raretés n'ont plus de plafond de prix (seul le ratio compte)
+IDLE_UNCAPPED = {"epic", "legendary"}
 
 
-def worth(rarity, price, min_ratio=None):
-    """Prix acceptable pour cette rareté (sous le seuil ET assez de points par essecoin)."""
+def worth(rarity, price, min_ratio=None, idle=False):
+    """Prix acceptable pour cette rareté : sous le plafond (sauf épique / légendaire quand
+    `idle`) ET assez de points par essecoin."""
     r = rarity.lower()
-    ratio = MIN_RATIO if min_ratio is None else min_ratio
-    return r in POINTS and 0 < price < MAX_PRICE[r] and POINTS[r] / price >= ratio
+    if r not in POINTS or price <= 0:
+        return False
+    ratio = MIN_RATIO_BY_RARITY.get(r, MIN_RATIO) if min_ratio is None else min_ratio
+    under_cap = price < MAX_PRICE[r] or (idle and r in IDLE_UNCAPPED)
+    return under_cap and POINTS[r] / price >= ratio
 
 
-def price_limits(ratio):
-    return {r: max((p for p in range(1, MAX_PRICE[r]) if worth(r, p, ratio)), default=0) for r in POINTS}
+def price_limits(ratio, idle=False):
+    return {r: max((p for p in range(1, 1001) if worth(r, p, ratio, idle)), default=0) for r in POINTS}
 
 
-PRICE_LIMIT = price_limits(MIN_RATIO)
-RELAXED_LIMIT = price_limits(min(MIN_RATIO, RELAXED_RATIO))
+PRICE_LIMIT = price_limits(None)
+RELAXED_LIMIT = price_limits(RELAXED_RATIO, idle=True)
 
 # --- achat-revente : annonces sous la valeur de recyclage -------------------------
 RECYCLE_VALUE = {"common": 5, "rare": 15, "epic": 40}
@@ -500,7 +508,7 @@ def market_scan(page):
     """Une lecture du marché par rareté (sert à l'achat-revente et aux achats)."""
     out = {}
     for rarity in POINTS:
-        limit = max(RELAXED_LIMIT[rarity], FLIP_LIMIT.get(rarity, 0))
+        limit = max(RELAXED_LIMIT[rarity], PRICE_LIMIT[rarity], FLIP_LIMIT.get(rarity, 0))
         out[rarity] = fetch_listings(page, rarity, limit) if limit > 0 else []
         got = out[rarity]
         new = [l for l in got if l["is_new"]]
@@ -621,7 +629,7 @@ def buy_all(page, scan, budget, snapshot, skip=()):
     # passe 2 : essecoins qui dorment -> ratio assoupli, en gardant RESERVE
     if not held and budget >= IDLE_BALANCE:
         p2 = sorted([c for c in cands if c["name"] not in bought
-                     and worth(c["rarity"], c["price"], RELAXED_RATIO)], key=key)
+                     and worth(c["rarity"], c["price"], RELAXED_RATIO, idle=True)], key=key)
         for c in p2:
             if state["halt"]:
                 break
