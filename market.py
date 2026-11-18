@@ -502,6 +502,11 @@ def market_scan(page):
     for rarity in POINTS:
         limit = max(RELAXED_LIMIT[rarity], FLIP_LIMIT.get(rarity, 0))
         out[rarity] = fetch_listings(page, rarity, limit) if limit > 0 else []
+        got = out[rarity]
+        new = [l for l in got if l["is_new"]]
+        log(f"Marché {rarity} : {len(got)} annonce(s) lues jusqu'à {limit} essecoins, "
+            f"{len(new)} carte(s) manquante(s)"
+            + (f" (dès {min(l['price'] for l in new)})" if new else ""))
     return out
 
 
