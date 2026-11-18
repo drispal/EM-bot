@@ -91,6 +91,11 @@ def past_trade_status(text, feeder, names):
     return None
 
 
+def L(msg):
+    """Journal du volet Joss (section « Compte Joss » du résumé)."""
+    M.log(msg, "Joss")
+
+
 def read_json(name):
     try:
         with open(os.path.join(TRACK_DIR, name), encoding="utf-8") as f:
@@ -128,43 +133,43 @@ def trade_step(page, link, now, reserved=()):
         status = past_trade_status(page.locator("main").inner_text(), FEEDER_NAME, tr["get"])
         age = int((now - tr["t"]) / 60)
         if status:
-            M.log(f"Échange avec Joss ({', '.join(tr['get'])}) : {status}.")
+            L(f"Échange avec Joss ({', '.join(tr['get'])}) : {status}.")
             link.pop("trade")
         elif age >= TRADE_PENDING_MIN:
-            M.log(f"Échange avec Joss sans réponse après {age} min : abandonné.")
+            L(f"Échange avec Joss sans réponse après {age} min : abandonné.")
             link.pop("trade")
         else:
-            M.log(f"Échange avec Joss en attente depuis {age} min.")
+            L(f"Échange avec Joss en attente depuis {age} min.")
             return False
     # 2. nouvelle proposition
     M.goto(page, "/market/trades")
     href = friend_href(page, FEEDER_NAME)
     if not href:
-        M.log(f"Échange : ami « {FEEDER_NAME} » introuvable.")
+        L(f"Échange : ami « {FEEDER_NAME} » introuvable.")
         return False
     M.goto(page, href)
     wanted = sorted([c for c in trade_cards(page, "get") if c["is_new"]],
                     key=lambda c: -PTS.get(c["rarity"], 0))[:MAX_GET]
     if not wanted:
-        M.log("Échange : rien de nouveau chez Joss pour l'instant.")
+        L("Échange : rien de nouveau chez Joss pour l'instant.")
         return False
     link["wanted"] = len(wanted)
     value = sum(PTS.get(c["rarity"], 0) for c in wanted)
     M.goto(page, "/market/sell")
     junk = pick_junk([it for it in M.scan_sell(page) if it["name"] not in reserved], value)
     if not junk:
-        M.log("Échange : aucun doublon de peu de valeur à donner pour l'instant.")
+        L("Échange : aucun doublon de peu de valeur à donner pour l'instant.")
         return False
     names = [c["name"] for c in wanted]
     txt = (f"Échange avec Joss : je donne {junk['rarity']} « {junk['name']} », "
            f"je reçois {', '.join(f'{c['rarity']} {c['name']}' for c in wanted)} (≈ +{value} points)")
     if LINK_DRY_RUN:
-        M.log(f"[SIMULATION] {txt}")
+        L(f"[SIMULATION] {txt}")
         return False
     M.goto(page, href)
     give = {c["name"]: c for c in trade_cards(page, "give")}
     if junk["name"] not in give:
-        M.log(f"Échange : « {junk['name']} » absent de la liste à donner, abandon.")
+        L(f"Échange : « {junk['name']} » absent de la liste à donner, abandon.")
         return False
     get = {c["name"]: c for c in trade_cards(page, "get")}
     for n in names:
@@ -174,12 +179,12 @@ def trade_step(page, link, now, reserved=()):
     ticked = page.locator("main input[name='get']:checked").count(), page.locator(
         "main input[name='give']:checked").count()
     if ticked[1] != 1 or not 1 <= ticked[0] <= MAX_GET:
-        M.log(f"Échange : sélection inattendue {ticked}, abandon (rien envoyé).")
+        L(f"Échange : sélection inattendue {ticked}, abandon (rien envoyé).")
         return False
     M.press(page.get_by_role("button", name="Send the proposal", exact=True))
     M.settle(page)
     link["trade"] = {"t": now, "get": names, "give": junk["name"]}
-    M.log(f"{txt} : proposition envoyée.")
+    L(f"{txt} : proposition envoyée.")
     return True
 
 
@@ -196,7 +201,7 @@ def bait_step(page, data, link, now):
         link["bait_open"] = False
         link["bait_closed_at"] = now
         write_json("bait.json", {"name": None})
-        M.log("Annonce appât terminée (vendue ou retirée).")
+        L("Annonce appât terminée (vendue ou retirée).")
     if bait_listed:
         return None
     if not feeder_alive(fb, now):
@@ -212,18 +217,18 @@ def bait_step(page, data, link, now):
     items = [it for it in M.scan_sell(page) if it["name"] not in reserved]
     junk = pick_junk(items, 0)
     if not junk or junk["rarity"] == "EPIC":
-        M.log("Appât : aucun doublon commun ou rare à mettre en vente.")
+        L("Appât : aucun doublon commun ou rare à mettre en vente.")
         return None
     txt = f"Appât : {junk['rarity']} « {junk['name']} » à {price} essecoins (solde de Joss : {balance})"
     if LINK_DRY_RUN:
-        M.log(f"[SIMULATION] {txt}")
+        L(f"[SIMULATION] {txt}")
         return junk["name"]
     M.list_for_sale(page, junk, price)
     data["listings"].append({"name": junk["name"], "price": price, "listed_at": now, "bait": True})
     link["bait_open"] = True
     write_json("bait.json", {"name": junk["name"], "rarity": junk["rarity"], "price": price,
                              "listed_at": now})
-    M.log(f"{txt} : mise en vente.")
+    L(f"{txt} : mise en vente.")
     return junk["name"]
 
 
@@ -251,21 +256,19 @@ def main_link(page):
         before = json.dumps(data, sort_keys=True)
         now = time.time()
         if not LINK_DRY_RUN and not feeder_alive(read_json("feeder.json"), now):
-            M.log("Compte nourrisseur : Joss n'a pas publié son solde récemment, rien proposé.")
+            L("Compte nourrisseur : Joss n'a pas publié son solde récemment, rien proposé.")
             return 0
         # l'appât (des essecoins) passe avant l'échange : il réserve son doublon, l'échange prend un autre
         bait = bait_step(page, data, link, now)
         trade_step(page, link, now, reserved={bait} if bait else ())
         spare = spares_needed(link, data, now)
-        if spare:
-            M.log(f"Réserve : {spare} doublon(s) commun(s)/rare(s) gardé(s) pour Joss (non recyclés).")
         if json.dumps(data, sort_keys=True) != before:
             M.save_state(data)
         return spare
     except SystemExit:
         raise
     except Exception as exc:  # noqa: BLE001  (le compte nourrisseur ne doit jamais bloquer le marché)
-        M.log(f"Compte nourrisseur : erreur ignorée ({type(exc).__name__}: {str(exc)[:120]}).")
+        L(f"Compte nourrisseur : erreur ignorée ({type(exc).__name__}: {str(exc)[:120]}).")
     return 0
 
 
@@ -320,7 +323,7 @@ def accept_trades(page):
             if MAIN_NAME_RE.search(tr["sender"] or ""):
                 todo = (i, tr)
                 break
-            M.log(f"Échange de « {tr['sender']} » ignoré (pas le compte principal).")
+            L(f"Échange de « {tr['sender']} » ignoré (pas le compte principal).")
         if not todo:
             break
         i, tr = todo
@@ -330,13 +333,13 @@ def accept_trades(page):
             or len(tr["give"]) > MAX_GET or not tr["give"]
         btn = "Decline" if bad else "Accept the trade"
         if FEEDER_DRY_RUN:
-            M.log(f"[SIMULATION] {'Refuser' if bad else 'Accepter'} l'échange : Joss reçoit {recv} "
+            L(f"[SIMULATION] {'Refuser' if bad else 'Accepter'} l'échange : Joss reçoit {recv} "
                   f"et donne {sent}.")
             break
         page.get_by_role("button", name=btn, exact=True).nth(i).click()
         M.settle(page)
         done += 1
-        M.log(f"{'Échange refusé' if bad else 'Échange accepté'} : Joss reçoit {recv} et donne {sent}.")
+        L(f"{'Échange refusé' if bad else 'Échange accepté'} : Joss reçoit {recv} et donne {sent}.")
     return done
 
 
@@ -347,10 +350,10 @@ def buy_bait(page):
     bal = M.balance(page)
     price, name = int(bait["price"]), bait["name"]
     if bal is None or price > bal:
-        M.log(f"Appât « {name} » à {price} : solde de Joss insuffisant ({bal}).")
+        L(f"Appât « {name} » à {price} : solde de Joss insuffisant ({bal}).")
         return False
     if bait.get("rarity", "").upper() in NEVER:
-        M.log("Appât refusé : légendaire / Créateur (jamais).")
+        L("Appât refusé : légendaire / Créateur (jamais).")
         return False
     M.goto(page, M.market_path(bait["rarity"].lower(), name))
     for _ in range(4):
@@ -362,17 +365,17 @@ def buy_bait(page):
             if info and info["name"] == name and info["price"] == price \
                     and MAIN_NAME_RE.search(seller):
                 if FEEDER_DRY_RUN:
-                    M.log(f"[SIMULATION] Acheter l'appât « {name} » à {price} (vendeur {seller}).")
+                    L(f"[SIMULATION] Acheter l'appât « {name} » à {price} (vendeur {seller}).")
                     return False
                 M.press(page.locator(M.BUY_FORMS).nth(i).get_by_role("button", name="Buy", exact=True))
                 M.settle(page)
-                M.log(f"Appât acheté : « {name} » à {price} essecoins (vendeur {seller}).")
+                L(f"Appât acheté : « {name} » à {price} essecoins (vendeur {seller}).")
                 return True
         more = page.get_by_role("button", name="Show more listings")
         if more.count() == 0:
             break
         M.show_more(page, more)
-    M.log(f"Appât « {name} » à {price} pas (encore) visible sur le marché.")
+    L(f"Appât « {name} » à {price} pas (encore) visible sur le marché.")
     return False
 
 
@@ -392,11 +395,11 @@ def feeder_main():
         except SystemExit:
             raise
         except Exception as exc:  # noqa: BLE001
-            M.log(f"Joss : erreur ignorée ({type(exc).__name__}: {str(exc)[:120]}).")
+            L(f"Joss : erreur ignorée ({type(exc).__name__}: {str(exc)[:120]}).")
         M.goto(page, "/market")
         bal = M.balance(page)
         if bal is not None:
             write_json("feeder.json", {"balance": bal, "at": time.time()})
-            M.log(f"Solde de Joss : {bal} essecoins.")
+            M.log(f"Solde de Joss : {bal} essecoins", "Bilan")
         browser.close()
     M.write_summary("Joss (compte nourrisseur)")

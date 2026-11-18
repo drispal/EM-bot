@@ -120,14 +120,36 @@ STATE_FILE = os.environ.get("SELL_STATE_FILE", "sell_state.json")
 MAX_RECYCLES = 100  # garde-fous par exécution
 MAX_MORE_CLICKS = 60  # garde-fou : le marché des rares compte plusieurs centaines d'annonces à 15-20
 
-report = []
+report = []  # (section, message)
+tables = {}  # section -> {"header": [...], "rows": [[...]]}
 state = {"halt": False}  # passe à True si aucune action n'apparaît dans l'historique
 pending = []  # actions cliquées, à vérifier dans l'historique
 
 
-def log(msg):
+ALERT_MARKS = ("⚠", "Session expirée", "erreur ignorée", "arrêt du marché")
+
+
+def log(msg, sec="Autres"):
+    """Ligne de journal rangée dans une section du résumé (les alertes remontent en tête)."""
     print(msg)
-    report.append(msg)
+    report.append(("À regarder" if any(k in msg for k in ALERT_MARKS) else sec, msg))
+
+
+def table_row(sec, header, row):
+    t = tables.setdefault(sec, {"header": header, "rows": []})
+    t["rows"].append(row)
+
+
+SECTIONS = [  # ordre d'affichage dans le résumé
+    ("À regarder", "⚠ À regarder"),
+    ("Joss", "Compte Joss (échange, appât, réserve)"),
+    ("Doublons", "Doublons de ce passage"),
+    ("Achats", "Achats"),
+    ("Annonces", "Mes annonces en cours"),
+    ("Vérifications", "Vérifications"),
+    ("Lecture", "Lecture du marché"),
+    ("Autres", "Autres"),
+]
 
 
 def write_summary(title):
@@ -136,10 +158,28 @@ def write_summary(title):
         return
     mode = "SIMULATION (rien n'a été cliqué)" if DRY_RUN else "ACTIONS RÉELLES"
     sell = "vente simulée" if SELL_DRY_RUN else "vente réelle"
+    out = [f"## {title} : {mode} ({sell})", ""]
+    bilan = [msg for sec, msg in report if sec == "Bilan"]
+    out += [f"**{b}**  " for b in bilan] + [""] if bilan else []
+    shown = False
+    for key, label in SECTIONS:
+        lines = [msg for sec, msg in report if sec == key]
+        t = tables.get(key)
+        if not lines and not t:
+            continue
+        shown = True
+        n = f" ({len(t['rows'])})" if t else ""
+        out.append(f"### {label}{n}")
+        out += [f"- {l.strip()}" for l in lines]
+        if t:
+            out.append("| " + " | ".join(t["header"]) + " |")
+            out.append("|" + "---|" * len(t["header"]))
+            out += ["| " + " | ".join(str(c) for c in r) + " |" for r in t["rows"]]
+        out.append("")
+    if not shown and not bilan:
+        out.append("Rien à faire.")
     with open(path, "a", encoding="utf-8") as f:
-        f.write(f"## {title} : {mode} ({sell})\n")
-        for line in report or ["Rien à faire."]:
-            f.write(f"- {line}\n")
+        f.write("\n".join(out) + "\n")
 
 
 def set_output(key, value):
@@ -210,7 +250,7 @@ def goto(page, path, tries=2):
     except PlaywrightError:
         pass
     if "/login" in page.url:
-        report.append("Session expirée : relance login_local.py et mets à jour le secret.")
+        log("Session expirée : relance login_local.py et mets à jour le secret.")
         write_summary("Marché")
         sys.exit("Session expirée.")
     page.wait_for_timeout(800)
@@ -272,7 +312,7 @@ def guard(page):
     aucune n'y est visible, on arrête (les clics semblent sans effet)."""
     waiting = [p for p in pending if not p["confirmed"]]
     if len(waiting) >= 4 and time.time() - waiting[0]["t"] > 90 and check_pending(page) == 0:
-        log("Aucune des dernières actions n'apparaît dans l'historique : arrêt du marché.")
+        log("Aucune des dernières actions n'apparaît dans l'historique : arrêt du marché.", "À regarder")
         state["halt"] = True
 
 
@@ -340,19 +380,22 @@ def manage_listings(page):
     for e in data["listings"]:
         cur = next((c for c in current if c["name"] == e["name"]), None)
         if cur is None:
-            log(f"Annonce « {e['name']} » terminée (vendue ou retirée).")
+            log(f"Annonce « {e['name']} » terminée (vendue ou retirée).", "Annonces")
             continue
         age = int((now - e["listed_at"]) / 60)
         if age < SELL_TIMEOUT_MIN:
-            log(f"Annonce « {e['name']} » à {cur['price']} essecoins : en vente depuis {age} min.")
+            print(f"Annonce « {e['name']} » à {cur['price']} essecoins : en vente depuis {age} min.")
+            table_row("Annonces", ["Carte", "Prix", "En vente depuis", "Retrait auto dans"],
+                      [f"« {e['name']} »" + (" (appât Joss)" if e.get("bait") else ""),
+                       f"{cur['price']}", f"{age} min", f"{max(SELL_TIMEOUT_MIN - age, 0)} min"])
             keep.append(e)
         elif SELL_DRY_RUN:
-            log(f"[SIMULATION] Retirer l'annonce « {e['name']} » ({age} min sans vente) puis recycler.")
+            log(f"[SIMULATION] Retirer l'annonce « {e['name']} » ({age} min sans vente) puis recycler.", "Annonces")
             keep.append(e)
         else:
             withdraw(page, cur["lid"])
             withdrawn.add(e["name"])
-            log(f"Annonce « {e['name']} » retirée ({age} min sans vente) : la carte sera recyclée.")
+            log(f"Annonce « {e['name']} » retirée ({age} min sans vente) : la carte sera recyclée.", "Annonces")
     if len(keep) != len(data["listings"]) or withdrawn:
         data["listings"] = keep
         save_state(data)
@@ -414,22 +457,66 @@ def list_for_sale(page, it, price):
     settle(page)
 
 
+def recycle_everything(page, start):
+    """Compte Joss : un seul clic sur « Recycle N duplicates » (toutes raretés, légendaires et
+    Créateur compris ; le site garde un exemplaire de chaque carte). Jamais utilisé sur le principal."""
+    items = scan_sell(page, RECYCLABLE_JOSS)
+    btn = page.get_by_role("button", name=re.compile(r"^Recycle \d+ duplicates"))
+    out = {"start": start, "gain": 0, "recycled": 0, "listed": 0}
+    if not items or btn.count() == 0:
+        return out
+    m_gain = re.search(r"\+\s*(\d+)", btn.first.inner_text())
+    gain = int(m_gain.group(1)) if m_gain else sum(it["gain"] for it in items)
+    names = ", ".join(f"{it['rarity']} « {it['name']} »" for it in items)
+    if DRY_RUN:
+        log(f"[SIMULATION] Recycler tous les doublons ({len(items)} carte(s), ≈ +{gain} essecoins) : {names}",
+            "Doublons")
+        out.update(gain=gain)
+        return out
+    press(btn.first)
+    settle(page)
+    guard(page)
+    left = items
+    for _ in range(3):  # le site met un moment à se mettre à jour
+        goto(page, "/market/sell")
+        left = scan_sell(page, RECYCLABLE_JOSS)
+        if not left:
+            break
+        page.wait_for_timeout(5000)
+    log(f"Tous les doublons recyclés ({len(items)} carte(s), ≈ +{gain} essecoins) : {names}", "Doublons")
+    if left:
+        log(f"  ⚠ Il reste {len(left)} carte(s) avec un bouton « Recycle » après le clic "
+            "(retard du site ou cartes bloquées).", "Doublons")
+    out.update(gain=gain, recycled=len(items))
+    return out
+
+
 def recycle_all(page, snapshot, no_sell, keep_spare=0):
     """Vend (RARE / EPIC) ou recycle les doublons."""
     goto(page, "/market/sell")
     start = balance(page)
+    if FEEDER:
+        return recycle_everything(page, start)
     handled = set()
     gain_total = 0
     recycled = listed = 0
     data = load_state()
+    reserve_logged = False
     for _ in range(MAX_RECYCLES):
         if state["halt"]:
             break
-        items = [it for it in scan_sell(page, RECYCLABLE_JOSS if FEEDER else RECYCLABLE)
+        items = [it for it in scan_sell(page)
                  if it["name"] and it["name"] not in handled and not it["on_market"]]
         spare = sorted((it for it in items if it["rarity"] in ("COMMON", "RARE")),
                        key=lambda it: it["rarity"] != "COMMON")[:keep_spare]
         keep = {it["name"] for it in spare}
+        if keep_spare and not reserve_logged:
+            reserve_logged = True
+            if spare:
+                log("Gardés en réserve pour Joss (non recyclés) : "
+                    + ", ".join(f"{it['rarity']} « {it['name']} »" for it in spare), "Joss")
+            else:
+                log("Réserve pour Joss demandée mais aucun doublon commun/rare disponible.", "Joss")
         items = [it for it in items if it["name"] not in keep]
         if not items:
             break
@@ -438,9 +525,9 @@ def recycle_all(page, snapshot, no_sell, keep_spare=0):
                 if it["rarity"] in SELL_RARITIES and it["name"] not in no_sell:
                     log(f"[SIMULATION] Mettre en vente {it['rarity']} « {it['name']} » à {sell_price(it)} "
                         f"(last sold {it['last_sold']} · cheapest now {it['cheapest']}), "
-                        f"sinon recyclage après {SELL_TIMEOUT_MIN} min")
+                        f"sinon recyclage après {SELL_TIMEOUT_MIN} min", "Doublons")
                 else:
-                    log(f"[SIMULATION] Recycler {it['rarity']} « {it['name']} » ({it['label']})")
+                    log(f"[SIMULATION] Recycler {it['rarity']} « {it['name']} » ({it['label']})", "Doublons")
                 gain_total += it["gain"]
             break
         it = items[0]
@@ -450,7 +537,7 @@ def recycle_all(page, snapshot, no_sell, keep_spare=0):
             if SELL_DRY_RUN:
                 log(f"[SIMULATION] Mettre en vente {it['rarity']} « {it['name']} » à {price} "
                     f"(last sold {it['last_sold']} · cheapest now {it['cheapest']}), "
-                    f"sinon recyclage après {SELL_TIMEOUT_MIN} min. En attendant : recyclage.")
+                    f"sinon recyclage après {SELL_TIMEOUT_MIN} min. En attendant : recyclage.", "Doublons")
             else:
                 list_for_sale(page, it, price)
                 data["listings"].append({"name": it["name"], "price": price, "listed_at": time.time()})
@@ -458,7 +545,7 @@ def recycle_all(page, snapshot, no_sell, keep_spare=0):
                 listed += 1
                 log(f"Mis en vente {it['rarity']} « {it['name']} » à {price} essecoins "
                     f"(last sold {it['last_sold']} · cheapest now {it['cheapest']}), "
-                    f"recyclage si invendu après {SELL_TIMEOUT_MIN} min.")
+                    f"recyclage si invendu après {SELL_TIMEOUT_MIN} min.", "Doublons")
                 goto(page, "/market/sell")
                 continue
         press(page.locator("main div.grid > div").nth(it["idx"])
@@ -467,7 +554,7 @@ def recycle_all(page, snapshot, no_sell, keep_spare=0):
         add_pending("Duplicate recycled", it["name"], snapshot)
         recycled += 1
         gain_total += it["gain"]
-        log(f"Recyclage envoyé {it['rarity']} « {it['name']} » (≈ +{it['gain']} essecoins)")
+        log(f"Recyclage envoyé {it['rarity']} « {it['name']} » (≈ +{it['gain']} essecoins)", "Doublons")
         guard(page)
         goto(page, "/market/sell")
     return {"start": start, "gain": gain_total, "recycled": recycled, "listed": listed}
@@ -488,9 +575,10 @@ def verify_listings(page, names):
             page.wait_for_timeout(20000)
     for n in names:
         if n in missing:
-            log(f"  ⚠ Annonce « {n} » introuvable dans « My cards on sale » (même après 60 s).")
-        else:
-            log(f"Annonce « {n} » visible dans « My cards on sale ».")
+            log(f"  ⚠ Annonce « {n} » introuvable dans « My cards on sale » (même après 60 s).", "Vérifications")
+    ok = len(names) - len(missing)
+    if ok:
+        log(f"{ok}/{len(names)} annonce(s) visible(s) dans « My cards on sale ».", "Vérifications")
 
 
 # ------------------------------------------------------------------ achats
@@ -590,9 +678,12 @@ def market_scan(page, budget=0):
         out[rarity] = fetch_listings(page, rarity, limit) if limit > 0 else []
         got = out[rarity]
         new = [l for l in got if l["is_new"]]
-        log(f"Marché {rarity} : {len(got)} annonce(s) lues jusqu'à {limit} essecoins, "
-            f"{len(new)} carte(s) manquante(s)"
-            + (f" (dès {min(l['price'] for l in new)})" if new else ""))
+        print(f"Marché {rarity} : {len(got)} annonce(s) lues jusqu'à {limit} essecoins, "
+              f"{len(new)} carte(s) manquante(s)"
+              + (f" (dès {min(l['price'] for l in new)})" if new else ""))
+        table_row("Lecture", ["Rareté", "Annonces lues", "Jusqu'à (essecoins)", "Cartes qui me manquent",
+                              "La moins chère"],
+                  [rarity, len(got), limit, len(new), min(l["price"] for l in new) if new else "-"])
     return out
 
 
@@ -650,7 +741,7 @@ def flip_all(page, scan, budget, snapshot):
         txt = (f"{c['rarity']} « {c['name']} » à {c['price']} essecoins "
                f"(recyclage +{RECYCLE_VALUE[c['rarity'].lower()]}, gain ≈ +{c['profit']})")
         if DRY_RUN:
-            log(f"[SIMULATION] Achat-revente {txt}")
+            log(f"[SIMULATION] Achat-revente {txt}", "Achats")
             budget -= c["price"]
             flipped.add(c["name"])
             continue
@@ -659,7 +750,7 @@ def flip_all(page, scan, budget, snapshot):
             continue  # déjà vendue
         budget -= paid
         flipped.add(c["name"])
-        log(f"Achat-revente envoyé {txt}")
+        log(f"Achat-revente envoyé {txt}", "Achats")
     return budget, flipped
 
 
@@ -681,13 +772,13 @@ def buy_all(page, scan, budget, snapshot, skip=()):
         if DRY_RUN:
             paid = c["price"]
             log(f"[SIMULATION] Acheter {c['rarity']} « {c['name']} » à {paid} essecoins "
-                f"({pts} pt, {pts / paid:.2f} pt/essecoin)")
+                f"({pts} pt, {pts / paid:.2f} pt/essecoin)", "Achats")
         else:
             paid = do_buy(page, rarity, c["name"], c["price"], snapshot)
             if paid is None:
                 return  # plus disponible (vendue ou déjà possédée)
             log(f"Achat envoyé {c['rarity']} « {c['name']} » à {paid} essecoins "
-                f"({pts} pt, {pts / paid:.2f} pt/essecoin)")
+                f"({pts} pt, {pts / paid:.2f} pt/essecoin)", "Achats")
         budget -= paid
         purchases += 1
 
@@ -700,7 +791,7 @@ def buy_all(page, scan, budget, snapshot, skip=()):
         if c["price"] > budget:
             held = True
             log(f"Mise de côté pour {c['rarity']} « {c['name']} » à {c['price']} essecoins "
-                f"(solde {budget}) : pas d'achat moins rentable en attendant.")
+                f"(solde {budget}) : pas d'achat moins rentable en attendant.", "Achats")
             break
         buy(c)
 
@@ -716,7 +807,7 @@ def buy_all(page, scan, budget, snapshot, skip=()):
             if c["price"] > budget or budget - c["price"] < RESERVE:
                 if 0 < c["price"] - budget <= HOLD_AHEAD:
                     log(f"Mise de côté ({label}) pour {c['rarity']} « {c['name']} » à "
-                        f"{c['price']} essecoins (solde {budget}).")
+                        f"{c['price']} essecoins (solde {budget}).", "Achats")
                     break
                 continue
             buy(c)
@@ -779,16 +870,16 @@ def main():
                     break
                 if attempt < 3:
                     page.wait_for_timeout(20000)
-            log(f"Vérification finale : {ok}/{len(pending)} action(s) visibles dans l'historique.")
+            log(f"Historique du site : {ok}/{len(pending)} action(s) retrouvée(s).", "Vérifications")
             for p_ in pending:
                 if not p_["confirmed"]:
-                    log(f"  ⚠ « {p_['name']} » ({p_['kind']}) toujours absent de l'historique.")
+                    log(f"  ⚠ « {p_['name']} » ({p_['kind']}) toujours absent de l'historique.", "Vérifications")
         goto(page, "/market")
         final = balance(page)
-        log(f"Solde : {start} -> {final} essecoins ({recycled} recyclage(s), {listed} mise(s) en vente, "
-            f"{flips} achat(s)-revente, {purchases} achat(s))")
+        log(f"Solde : {start} → {final} essecoins · {recycled} recyclage(s) · {listed} mise(s) en vente · "
+            f"{flips} achat(s)-revente · {purchases} achat(s)", "Bilan")
         browser.close()
-    write_summary("Marché")
+    write_summary("Marché (compte Joss)" if FEEDER else "Marché")
 
 
 if __name__ == "__main__":
