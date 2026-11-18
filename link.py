@@ -30,7 +30,19 @@ FEEDER_DRY_RUN = M.flag("FEEDER_DRY_RUN")  # côté Joss
 TRACK_DIR = os.environ.get("TRACK_DIR", "data")
 FEEDER_NAME = os.environ.get("FEEDER_NAME", "Josserand")  # début du nom de Joss, vu du principal
 # nom du compte principal, vu de Joss (échanges reçus, vendeur de l'annonce appât)
-MAIN_NAME_RE = re.compile(os.environ.get("FEEDER_MAIN_NAME") or r"^(Damien|DJ)\b", re.I)
+def name_re(value):
+    """Nom du compte principal vu par Joss. Un nom complet simple (« Damien Rispal ») accepte aussi la
+    forme abrégée du marché (« Damien R. ») ; sinon la valeur est prise comme expression régulière."""
+    value = (value or "").strip()
+    if not value:
+        return re.compile(r"^(Damien|DJ)\b", re.I)
+    parts = value.split()
+    if len(parts) >= 2 and re.fullmatch(r"[\w' .-]+", value):
+        return re.compile(r"^\s*" + re.escape(parts[0]) + r"\s+" + re.escape(parts[1][0]), re.I)
+    return re.compile(value, re.I)
+
+
+MAIN_NAME_RE = name_re(os.environ.get("FEEDER_MAIN_NAME"))
 
 NEVER = {"LEGENDARY", "CREATOR"}            # jamais donnés ni vendus pour Joss
 PTS = {"COMMON": 1, "RARE": 3, "EPIC": 8, "LEGENDARY": 20, "CREATOR": 0}
@@ -249,7 +261,9 @@ def spares_needed(link, data, now):
 
 def main_link(page):
     """Appelé par market.py (compte principal) avant le recyclage des doublons.
-    Renvoie le nombre de doublons communs/rares à ne pas recycler (réserve pour Joss)."""
+    Renvoie (nombre de doublons communs/rares à garder en réserve pour Joss, noms des cartes déjà
+    engagées dans l'appât ou l'échange : le recyclage ne doit pas y toucher, même si le site tarde
+    à afficher « on the market or in a trade »)."""
     try:
         data = M.load_state()
         link = data.setdefault("link", {})
@@ -257,19 +271,24 @@ def main_link(page):
         now = time.time()
         if not LINK_DRY_RUN and not feeder_alive(read_json("feeder.json"), now):
             L("Compte nourrisseur : Joss n'a pas publié son solde récemment, rien proposé.")
-            return 0
+            return 0, set()
         # l'appât (des essecoins) passe avant l'échange : il réserve son doublon, l'échange prend un autre
         bait = bait_step(page, data, link, now)
         trade_step(page, link, now, reserved={bait} if bait else ())
         spare = spares_needed(link, data, now)
+        used = {e["name"] for e in data["listings"] if e.get("bait")}
+        if bait:
+            used.add(bait)
+        if link.get("trade"):
+            used.add(link["trade"]["give"])
         if json.dumps(data, sort_keys=True) != before:
             M.save_state(data)
-        return spare
+        return spare, used
     except SystemExit:
         raise
     except Exception as exc:  # noqa: BLE001  (le compte nourrisseur ne doit jamais bloquer le marché)
         L(f"Compte nourrisseur : erreur ignorée ({type(exc).__name__}: {str(exc)[:120]}).")
-    return 0
+    return 0, set()
 
 
 # ------------------------------------------------------------ côté Joss
@@ -314,6 +333,7 @@ def parse_incoming(text):
 
 def accept_trades(page):
     done = 0
+    handled = set()
     for _ in range(MAX_ACCEPT):
         M.goto(page, "/market/trades")
         texts = page.evaluate(INCOMING_JS)
@@ -327,6 +347,10 @@ def accept_trades(page):
         if not todo:
             break
         i, tr = todo
+        sig = (tr["sender"], tuple(c["name"] for c in tr["get"]), tuple(c["name"] for c in tr["give"]))
+        if sig in handled:
+            break  # déjà traité : le site l'affiche encore quelques instants
+        handled.add(sig)
         recv = ", ".join(f"{c['rarity']} {c['name']}" for c in tr["get"]) or "rien"
         sent = ", ".join(f"{c['rarity']} {c['name']}" for c in tr["give"]) or "rien"
         bad = any(c["rarity"] in NEVER for c in tr["get"]) or len(tr["get"]) > 2 \

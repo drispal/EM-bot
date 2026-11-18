@@ -477,21 +477,21 @@ def recycle_everything(page, start):
     settle(page)
     guard(page)
     left = items
-    for _ in range(3):  # le site met un moment à se mettre à jour
+    for _ in range(4):  # le site met un moment à se mettre à jour
         goto(page, "/market/sell")
         left = scan_sell(page, RECYCLABLE_JOSS)
         if not left:
             break
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(10000)
     log(f"Tous les doublons recyclés ({len(items)} carte(s), ≈ +{gain} essecoins) : {names}", "Doublons")
     if left:
-        log(f"  ⚠ Il reste {len(left)} carte(s) avec un bouton « Recycle » après le clic "
-            "(retard du site ou cartes bloquées).", "Doublons")
+        log(f"Encore {len(left)} carte(s) avec un bouton « Recycle » 30 s après le clic "
+            "(retard du site probable, elles seront reprises au prochain passage).", "Doublons")
     out.update(gain=gain, recycled=len(items))
     return out
 
 
-def recycle_all(page, snapshot, no_sell, keep_spare=0):
+def recycle_all(page, snapshot, no_sell, keep_spare=0, keep_names=()):
     """Vend (RARE / EPIC) ou recycle les doublons."""
     goto(page, "/market/sell")
     start = balance(page)
@@ -506,7 +506,8 @@ def recycle_all(page, snapshot, no_sell, keep_spare=0):
         if state["halt"]:
             break
         items = [it for it in scan_sell(page)
-                 if it["name"] and it["name"] not in handled and not it["on_market"]]
+                 if it["name"] and it["name"] not in handled and not it["on_market"]
+                 and it["name"] not in keep_names]  # appât / échange en cours : on n'y touche pas
         spare = sorted((it for it in items if it["rarity"] in ("COMMON", "RARE")),
                        key=lambda it: it["rarity"] != "COMMON")[:keep_spare]
         keep = {it["name"] for it in spare}
@@ -837,11 +838,11 @@ def main():
         snapshot = None if DRY_RUN else history_text(page)
 
         withdrawn = manage_listings(page)
-        keep_spare = 0
+        keep_spare, keep_names = 0, set()
         if not FEEDER:
             import link  # compte nourrisseur : échange + annonce appât, avant le recyclage des doublons
-            keep_spare = link.main_link(page)  # + doublons à garder en réserve pour Joss
-        r1 = recycle_all(page, snapshot, withdrawn, keep_spare)
+            keep_spare, keep_names = link.main_link(page)  # réserve pour Joss + cartes déjà engagées
+        r1 = recycle_all(page, snapshot, withdrawn, keep_spare, keep_names)
         start, recycled, listed = r1["start"], r1["recycled"], r1["listed"]
         # Budget = solde déjà crédité. Les recyclages de ce passage ne sont pas comptés :
         # le site les crédite avec du retard et un achat serait refusé faute de solde
