@@ -39,8 +39,9 @@
 
 ## Marché et enchères
 
-`market.py` tourne après chaque booster ouvert, `auctions.py` à chaque lancement
-(job séparé qui surveille les enchères qui se terminent dans les 6 minutes).
+`market.py` et `auctions.py` tournent à chaque lancement du workflow, qu'un booster
+soit disponible ou non (`auctions.py` est un job séparé qui surveille les enchères qui
+se terminent dans les 6 minutes).
 
 - **Doublons** : EPIC et COMMON sont recyclées. Les RARE sont mises en vente à prix
   fixe (un cran sous l'annonce la moins chère, entre 20 et 30 essecoins) ; si elles ne
@@ -50,7 +51,7 @@
   CREATOR ne sont jamais touchées. Une carte dont un exemplaire est déjà en vente ou
   en échange n'est jamais recyclée.
 - **Achats** : cartes manquantes (« New for you ») classées par points au classement
-  par essecoin (commune 1, rare 3, épique 8), sous les seuils epic < 40, rare < 25,
+  par essecoin (commune 1, rare 3, épique 8), sous les seuils epic ≤ 60, rare < 25,
   common < 15 et avec au moins `MIN_RATIO` = 0,125 point par essecoin.
 - **Enchères** : dans la dernière minute, mise minimale autorisée par le site (≈ +5 %)
   sur les cartes manquantes qui passent la même règle de prix ; remise si dépassé (4
@@ -65,5 +66,5 @@ Variables du dépôt (Settings > Secrets and variables > Actions > Variables) :
 | `MARKET_AUCTION_DRY_RUN` | `false` = mises réelles, sinon simulation |
 | `MARKET_MIN_RATIO` | points par essecoin minimum pour acheter (0,125 par défaut) |
 
-Le lancement manuel du workflow accepte `dry_run`, `min_ratio` et `force_market` pour
-tester sans toucher aux variables.
+Le lancement manuel du workflow accepte `dry_run` et `min_ratio` pour tester sans
+toucher aux variables.

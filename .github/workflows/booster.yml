@@ -11,10 +11,6 @@ on:
         description: 'Marché : points par essecoin minimum (test), vide = variable MARKET_MIN_RATIO ou 0.125'
         required: false
         default: ""
-      force_market:
-        description: 'Lancer le marché même sans booster ouvert ("true", pour tester)'
-        required: false
-        default: "false"
 
 jobs:
   open:
@@ -36,7 +32,7 @@ jobs:
 
       # Mémoire des annonces créées par le bot (sert à recycler après le délai)
       - name: Restore sell state
-        if: steps.booster.outputs.opened == 'true' || inputs.force_market == 'true'
+        if: ${{ !cancelled() }}
         uses: actions/cache/restore@v4
         with:
           path: sell_state.json
@@ -45,7 +41,7 @@ jobs:
 
       - name: Market (sell/recycle duplicates, buy missing cards)
         id: market
-        if: steps.booster.outputs.opened == 'true' || inputs.force_market == 'true'
+        if: ${{ !cancelled() }}  # à chaque passage, qu'un booster ait été ouvert ou non
         continue-on-error: true
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}

@@ -12,7 +12,7 @@
 2. Achat : cartes que l'on n'a pas encore (« New for you »), à prix fixe. On vise la
    valeur au classement (commune 1 pt, rare 3, épique 8) : on achète d'abord les
    meilleures « points par essecoin », et seulement si le prix reste sous le seuil
-   de la rareté (epic < 40, rare < 25, common < 15) et si le ratio est >= MIN_RATIO.
+   de la rareté (epic <= 60, rare < 25, common < 15) et si le ratio est >= MIN_RATIO.
 
 Interrupteurs (variables d'environnement) :
   DRY_RUN          "false" pour agir pour de vrai, sinon simulation (rien n'est cliqué).
@@ -43,7 +43,7 @@ RECYCLABLE = {"COMMON", "RARE", "EPIC"}  # on garde LEGENDARY et CREATOR
 
 # --- achats : valeur au classement (points par carte différente) ---------------
 POINTS = {"common": 1, "rare": 3, "epic": 8}
-MAX_PRICE = {"epic": 40, "rare": 25, "common": 15}  # achat si prix < seuil
+MAX_PRICE = {"epic": 61, "rare": 25, "common": 15}  # achat si prix < seuil (epic <= 60, rare <= 24, common <= 14)
 MIN_RATIO = float(os.environ.get("MIN_RATIO", "0.125"))  # points/essecoin minimum (0 = seuils seuls)
 
 
