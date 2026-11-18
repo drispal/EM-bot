@@ -46,6 +46,7 @@ def flag(name, default="true"):
 
 DRY_RUN = flag("DRY_RUN")
 SELL_DRY_RUN = DRY_RUN or flag("SELL_DRY_RUN")
+KEEP_SPARE = 0  # doublons communs/rares à garder pour le compte nourrisseur (fixé par link.main_link)
 FEEDER = flag("FEEDER", "false")  # compte nourrisseur (Joss) : il ne fait que vendre / recycler
 
 RARITIES = {"COMMON", "RARE", "EPIC", "LEGENDARY", "CREATOR"}
@@ -424,6 +425,10 @@ def recycle_all(page, snapshot, no_sell):
             break
         items = [it for it in scan_sell(page)
                  if it["name"] and it["name"] not in handled and not it["on_market"]]
+        spare = sorted((it for it in items if it["rarity"] in ("COMMON", "RARE")),
+                       key=lambda it: it["rarity"] != "COMMON")[:KEEP_SPARE]
+        keep = {it["name"] for it in spare}
+        items = [it for it in items if it["name"] not in keep]
         if not items:
             break
         if DRY_RUN:  # simulation complète : on liste tout, sans cliquer

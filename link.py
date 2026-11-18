@@ -120,6 +120,7 @@ def pick_junk(items, min_value_pts):
 
 
 def trade_step(page, link, now, reserved=()):
+    link["wanted"] = 0  # cartes nouvelles chez Joss (sert à garder un doublon en réserve)
     # 1. proposition en attente ?
     tr = link.get("trade")
     if tr:
@@ -147,6 +148,7 @@ def trade_step(page, link, now, reserved=()):
     if not wanted:
         M.log("Échange : rien de nouveau chez Joss pour l'instant.")
         return False
+    link["wanted"] = len(wanted)
     value = sum(PTS.get(c["rarity"], 0) for c in wanted)
     M.goto(page, "/market/sell")
     junk = pick_junk([it for it in M.scan_sell(page) if it["name"] not in reserved], value)
@@ -225,6 +227,21 @@ def bait_step(page, data, link, now):
     return junk["name"]
 
 
+def spares_needed(link, data, now):
+    """Doublons à ne pas recycler : un pour l'échange (si Joss a des cartes qui te manquent et qu'aucun
+    échange n'est en cours), un pour l'appât (si Joss a des essecoins et qu'aucune annonce n'est ouverte).
+    Ainsi le prochain passage a de quoi donner même si le booster n'a rien apporté."""
+    fb = read_json("feeder.json")
+    if not LINK_DRY_RUN and not feeder_alive(fb, now):
+        return 0
+    n = 1 if link.get("wanted", 0) > 0 and not link.get("trade") else 0
+    bait_open = any(e.get("bait") for e in data["listings"])
+    if (fb and not bait_open and int(fb.get("balance", 0)) >= BAIT_MIN
+            and fb.get("at", 0) > link.get("bait_closed_at", 0)):
+        n += 1
+    return n
+
+
 def main_link(page):
     """Appelé par market.py (compte principal) avant le recyclage des doublons."""
     try:
@@ -238,6 +255,9 @@ def main_link(page):
         # l'appât (des essecoins) passe avant l'échange : il réserve son doublon, l'échange prend un autre
         bait = bait_step(page, data, link, now)
         trade_step(page, link, now, reserved={bait} if bait else ())
+        M.KEEP_SPARE = spares_needed(link, data, now)
+        if M.KEEP_SPARE:
+            M.log(f"Réserve : {M.KEEP_SPARE} doublon(s) commun(s)/rare(s) gardé(s) pour Joss (non recyclés).")
         if json.dumps(data, sort_keys=True) != before:
             M.save_state(data)
     except SystemExit:
