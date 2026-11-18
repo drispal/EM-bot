@@ -109,7 +109,7 @@ tant que les variables du dépôt ne sont pas posées.
   Réglages (variables d'environnement de `link.py`) : `BAIT_MIN` (60), `BAIT_MAX` (500).
 - **Job `feeder` (Joss)** : ouvre son booster, accepte les échanges venant du principal,
   achète l'annonce appât, publie son solde dans `feeder.json` (branche `tracking`), puis
-  recycle ses doublons tout de suite, sans rien mettre en vente (jamais le dernier exemplaire d'une carte ; `FEEDER=true` : il
+  recycle tous ses doublons tout de suite, légendaires et Créateur compris, sans rien mettre en vente (jamais le dernier exemplaire d'une carte ; `FEEDER=true` : il
   n'achète rien pour lui).
 - **Principal → Joss** (`link.py`, avant le recyclage de chaque passage) :
   1. un échange à la fois : 1 doublon de peu de valeur (commune, rare ; épique seulement si

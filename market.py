@@ -2,7 +2,8 @@
 
 1. Doublons (sur /market/sell, bouton « Recycle N » SOUS chaque carte, jamais le
    bouton général « Recycle N duplicates »). Seules les COMMON / RARE / EPIC sont
-   concernées ; LEGENDARY et CREATOR ne sont jamais recyclées ni vendues. Une carte qui
+   concernées ; LEGENDARY et CREATOR ne sont jamais recyclées ni vendues (sauf sur le compte
+   nourrisseur Joss, qui recycle tous ses doublons). Une carte qui
    a déjà un exemplaire en vente ou en échange n'est pas recyclée.
    - COMMON : recyclées (5 essecoins).
    - RARE et EPIC : mises en vente à prix fixe (bien plus que les 15 / 40 du recyclage) ;
@@ -50,6 +51,8 @@ FEEDER = flag("FEEDER", "false")  # compte nourrisseur (Joss) : il ne fait que v
 
 RARITIES = {"COMMON", "RARE", "EPIC", "LEGENDARY", "CREATOR"}
 RECYCLABLE = {"COMMON", "RARE", "EPIC"}  # on garde LEGENDARY et CREATOR
+# Joss (compte nourrisseur) recycle tous ses doublons, légendaires et Créateur compris
+RECYCLABLE_JOSS = RECYCLABLE | {"LEGENDARY", "CREATOR"}
 
 # --- achats : valeur au classement (points par carte différente) ----------------
 POINTS = {"common": 1, "rare": 3, "epic": 8, "legendary": 20}
@@ -363,7 +366,7 @@ SELL_TILES_JS = r"""() => [...document.querySelectorAll('main div.grid > div')].
 })"""
 
 
-def scan_sell(page):
+def scan_sell(page, recyclable=RECYCLABLE):
     """Cartes avec un bouton « Recycle N » individuel (un seul appel au navigateur)."""
     out = []
     for i, t in enumerate(page.evaluate(SELL_TILES_JS)):
@@ -372,7 +375,7 @@ def scan_sell(page):
             continue  # jamais le bouton général
         lines = tile_lines(t["text"])
         rarity = tile_rarity(lines)
-        if rarity not in RECYCLABLE:
+        if rarity not in recyclable:
             continue
         text = t["text"]
         m_last = re.search(r"last sold\s+(\d+)", text, re.I)
@@ -422,7 +425,7 @@ def recycle_all(page, snapshot, no_sell, keep_spare=0):
     for _ in range(MAX_RECYCLES):
         if state["halt"]:
             break
-        items = [it for it in scan_sell(page)
+        items = [it for it in scan_sell(page, RECYCLABLE_JOSS if FEEDER else RECYCLABLE)
                  if it["name"] and it["name"] not in handled and not it["on_market"]]
         spare = sorted((it for it in items if it["rarity"] in ("COMMON", "RARE")),
                        key=lambda it: it["rarity"] != "COMMON")[:keep_spare]

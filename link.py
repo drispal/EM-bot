@@ -232,8 +232,8 @@ def spares_needed(link, data, now):
     échange n'est en cours), un pour l'appât (si Joss a des essecoins et qu'aucune annonce n'est ouverte).
     Ainsi le prochain passage a de quoi donner même si le booster n'a rien apporté."""
     fb = read_json("feeder.json")
-    if not LINK_DRY_RUN and not feeder_alive(fb, now):
-        return 0
+    if not feeder_alive(fb, now):
+        return 0  # pas de Joss actif : le compte principal recycle comme d'habitude
     n = 1 if link.get("wanted", 0) > 0 and not link.get("trade") else 0
     bait_open = any(e.get("bait") for e in data["listings"])
     if (fb and not bait_open and int(fb.get("balance", 0)) >= BAIT_MIN
