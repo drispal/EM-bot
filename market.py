@@ -16,9 +16,9 @@
    valeur au classement (commune 1 pt, rare 3, épique 8, légendaire 20) : on achète
    d'abord les meilleurs « points par essecoin », sous les seuils de la rareté
    (common < 15, rare < 25, epic <= 70, legendary <= 150) et si le ratio est >= MIN_RATIO.
-   Si le solde dépasse IDLE_BALANCE, le ratio minimum est assoupli (RELAXED_RATIO), et les
-   épiques et légendaires n'ont plus de plafond de prix : mieux vaut les payer cher que de
-   laisser dormir des essecoins. On garde toujours RESERVE essecoins.
+   Ensuite le ratio minimum est assoupli (RELAXED_RATIO : épique <= 100, légendaire <= 250)
+   pour ne jamais laisser dormir des essecoins ; au-delà de FLOOR_BALANCE, dernier palier
+   (FLOOR_RATIO). On n'attend une meilleure carte que si elle est à moins de HOLD_AHEAD.
    Si une carte intéressante n'est pas encore abordable, on met de côté plutôt que de
    dépenser pour des cartes moins rentables.
 
