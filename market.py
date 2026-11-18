@@ -46,6 +46,7 @@ def flag(name, default="true"):
 
 DRY_RUN = flag("DRY_RUN")
 SELL_DRY_RUN = DRY_RUN or flag("SELL_DRY_RUN")
+FEEDER = flag("FEEDER", "false")  # compte nourrisseur (Joss) : il ne fait que vendre / recycler
 
 RARITIES = {"COMMON", "RARE", "EPIC", "LEGENDARY", "CREATOR"}
 RECYCLABLE = {"COMMON", "RARE", "EPIC"}  # on garde LEGENDARY et CREATOR
@@ -738,6 +739,9 @@ def main():
         snapshot = None if DRY_RUN else history_text(page)
 
         withdrawn = manage_listings(page)
+        if not FEEDER:
+            import link  # compte nourrisseur : échange + annonce appât, avant le recyclage des doublons
+            link.main_link(page)
         r1 = recycle_all(page, snapshot, withdrawn)
         start, recycled, listed = r1["start"], r1["recycled"], r1["listed"]
         # Budget = solde déjà crédité. Les recyclages de ce passage ne sont pas comptés :
@@ -748,7 +752,7 @@ def main():
             budget += r1["gain"]  # simulation : on montre ce que ferait le passage complet
 
         purchases = flips = 0
-        if budget > 0:
+        if budget > 0 and not FEEDER:
             scan = market_scan(page, budget)
             # Les cartes de l'achat-revente suivent ensuite le circuit normal des doublons
             # (le site n'affiche pas tout de suite la carte achetée) : recyclage ou mise en vente.

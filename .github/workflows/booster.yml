@@ -16,6 +16,8 @@ jobs:
   open:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write  # branche tracking : solde de Joss (lu) et annonce appât (écrite)
     concurrency:
       group: booster-${{ github.ref_name }}
       cancel-in-progress: false
@@ -29,6 +31,10 @@ jobs:
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
         run: python open_booster.py
+
+      - name: Tracking branch
+        continue-on-error: true
+        run: .github/scripts/tracking.sh setup
 
       # Mémoire des annonces créées par le bot (sert à recycler après le délai)
       - name: Restore sell state
@@ -51,7 +57,16 @@ jobs:
           SELL_DRY_RUN: ${{ vars.MARKET_SELL_DRY_RUN || 'true' }}
           # Points par essecoin minimum pour acheter (commune 1 pt, rare 3, épique 8)
           MIN_RATIO: ${{ inputs.min_ratio || vars.MARKET_MIN_RATIO || '0.125' }}
+          # Compte nourrisseur (Joss) : échanges et annonce appât simulés tant que LINK_DRY_RUN != "false"
+          LINK_DRY_RUN: ${{ vars.LINK_DRY_RUN || 'true' }}
+          TRACK_DIR: data
+          FEEDER_NAME: ${{ vars.FEEDER_NAME || 'Josserand' }}
         run: python market.py
+
+      - name: Save link state
+        if: always() && github.ref_name == 'main'
+        continue-on-error: true
+        run: .github/scripts/tracking.sh push "Link state" bait.json
 
       - name: Save sell state
         if: always() && steps.market.outputs.state_changed == 'true'
@@ -111,3 +126,70 @@ jobs:
           # Simulation tant que la variable MARKET_AUCTION_DRY_RUN n'est pas "false"
           AUCTION_DRY_RUN: ${{ vars.MARKET_AUCTION_DRY_RUN || 'true' }}
         run: python auctions.py
+
+  # Compte nourrisseur (Joss) : booster, échanges reçus, annonce appât, recyclage des doublons.
+  # Ne tourne que si la variable FEEDER_ENABLED vaut "true" et si le secret ESSEC_STORAGE_STATE_JOSS existe.
+  feeder:
+    if: ${{ vars.FEEDER_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write  # branche tracking : solde de Joss (écrit), annonce appât (lue)
+    concurrency:
+      group: feeder-${{ github.ref_name }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+
+      - name: Tracking branch
+        continue-on-error: true
+        run: .github/scripts/tracking.sh setup
+
+      - name: Open booster (Joss)
+        env:
+          ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE_JOSS }}
+        run: python open_booster.py
+
+      - name: Restore sell state (Joss)
+        if: ${{ !cancelled() }}
+        uses: actions/cache/restore@v4
+        with:
+          path: sell_state_joss.json
+          key: sell-state-joss-${{ github.run_id }}
+          restore-keys: sell-state-joss-
+
+      - name: Trades and bait (Joss)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE_JOSS }}
+          FEEDER_DRY_RUN: ${{ vars.FEEDER_DRY_RUN || 'true' }}
+          FEEDER_MAIN_NAME: ${{ vars.FEEDER_MAIN_NAME }}
+          TRACK_DIR: data
+        run: python feeder.py
+
+      - name: "Market (Joss: sell/recycle duplicates only)"
+        id: market
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE_JOSS }}
+          FEEDER: "true"
+          DRY_RUN: ${{ vars.FEEDER_DRY_RUN || 'true' }}
+          SELL_DRY_RUN: ${{ vars.FEEDER_DRY_RUN || 'true' }}
+          SELL_STATE_FILE: sell_state_joss.json
+        run: python market.py
+
+      - name: Save sell state (Joss)
+        if: always() && steps.market.outputs.state_changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: sell_state_joss.json
+          key: sell-state-joss-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save Joss balance
+        if: always() && github.ref_name == 'main'
+        continue-on-error: true
+        run: .github/scripts/tracking.sh push "Feeder balance" feeder.json
