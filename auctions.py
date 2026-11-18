@@ -125,7 +125,8 @@ def main():
             for a in auctions:
                 if a["lid"] in tracked or a["secs"] is None or a["secs"] > HORIZON_S:
                     continue
-                if a["is_new"] and a["rarity"].lower() in M.POINTS and M.worth(a["rarity"], a["min"]):
+                if a["is_new"] and a["rarity"].lower() in M.POINTS \
+                        and M.acceptable(a["rarity"], a["min"], budget):
                     tracked[a["lid"]] = {"name": a["name"], "rarity": a["rarity"], "bids": 0,
                                          "last": None, "done": False}
                     log(f"Enchère suivie : {a['rarity']} « {a['name']} », mise minimale {a['min']} "
@@ -150,7 +151,7 @@ def main():
                         continue  # on est déjà en tête
                     budget += t["last"]  # dépassé : la mise nous est rendue
                     t["last"] = None
-                if not M.worth(a["rarity"], a["min"]) or a["min"] > budget:
+                if not M.acceptable(a["rarity"], a["min"], budget):
                     t["done"] = True
                     log(f"Enchère abandonnée : « {t['name']} », mise minimale {a['min']} "
                         f"(trop cher ou solde insuffisant : {budget}).")

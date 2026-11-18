@@ -56,7 +56,7 @@ POINTS = {"common": 1, "rare": 3, "epic": 8, "legendary": 20}
 MAX_PRICE = {"common": 15, "rare": 25, "epic": 71, "legendary": 151}
 MIN_RATIO = float(os.environ.get("MIN_RATIO", "0.125"))  # points/essecoin minimum
 MIN_RATIO_BY_RARITY = {"epic": 0.11}  # épique : jusqu'à 70 essecoins (8 pts / 70 = 0,114)
-RELAXED_RATIO = float(os.environ.get("RELAXED_RATIO", "0.06"))  # si les essecoins dorment
+RELAXED_RATIO = float(os.environ.get("RELAXED_RATIO", "0.08"))  # si les essecoins dorment
 IDLE_BALANCE = int(os.environ.get("IDLE_BALANCE", "100"))  # solde à partir duquel on assouplit
 RESERVE = int(os.environ.get("RESERVE", "60"))  # essecoins gardés lors de l'assouplissement
 # si les essecoins dorment, ces raretés n'ont plus de plafond de prix (seul le ratio compte)
@@ -72,6 +72,15 @@ def worth(rarity, price, min_ratio=None, idle=False):
     ratio = MIN_RATIO_BY_RARITY.get(r, MIN_RATIO) if min_ratio is None else min_ratio
     under_cap = price < MAX_PRICE[r] or (idle and r in IDLE_UNCAPPED)
     return under_cap and POINTS[r] / price >= ratio
+
+
+def acceptable(rarity, price, budget):
+    """Prix acceptable compte tenu du solde : règle normale, ou règle assouplie quand les
+    essecoins dorment (solde >= IDLE_BALANCE, RESERVE essecoins conservés)."""
+    if worth(rarity, price):
+        return price <= budget
+    return (budget >= IDLE_BALANCE and budget - price >= RESERVE
+            and worth(rarity, price, RELAXED_RATIO, idle=True))
 
 
 def price_limits(ratio, idle=False):
