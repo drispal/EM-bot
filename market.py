@@ -31,6 +31,7 @@ import os
 import re
 import sys
 import time
+from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright
 
@@ -86,7 +87,7 @@ SELL_TIMEOUT_MIN = int(os.environ.get("SELL_TIMEOUT_MIN", "120"))
 STATE_FILE = os.environ.get("SELL_STATE_FILE", "sell_state.json")
 
 MAX_RECYCLES = 100  # garde-fous par exécution
-MAX_MORE_CLICKS = 6
+MAX_MORE_CLICKS = 60  # garde-fou : le marché des rares compte plusieurs centaines d'annonces à 15-20
 
 report = []
 state = {"halt": False}  # passe à True si aucune action n'apparaît dans l'historique
@@ -462,8 +463,21 @@ def collect_listings(page):
     return out
 
 
-def market_path(rarity):
-    return f"/market?rarity={rarity}&kind=fixed&sort=price"
+def market_path(rarity, q=None):
+    path = f"/market?rarity={rarity}&kind=fixed&sort=price"
+    return path + f"&q={quote(q)}" if q else path
+
+
+def show_more(page, more):
+    """Clique « Show more listings » et attend que de nouvelles annonces s'affichent."""
+    before = page.locator(BUY_FORMS).count()
+    press(more.first)
+    try:
+        page.wait_for_function(
+            "([sel, n]) => document.querySelectorAll(sel).length > n", arg=[BUY_FORMS, before],
+            timeout=8000)
+    except Exception:  # noqa: BLE001  (plus d'annonce à charger, ou chargement lent)
+        page.wait_for_timeout(1000)
 
 
 def fetch_listings(page, rarity, limit):
@@ -477,9 +491,8 @@ def fetch_listings(page, rarity, limit):
         if more.count() == 0 or more_clicks >= MAX_MORE_CLICKS \
                 or (last_price is not None and last_price > limit):
             break
-        press(more.first)
+        show_more(page, more)
         more_clicks += 1
-        settle(page)
     return [l for l in listings if l["rarity"].lower() == rarity and l["price"] <= limit]
 
 
@@ -503,8 +516,8 @@ def cheapest_by_name(listings):
 def locate_listing(page, rarity, name, limit, owned=False):
     """Recharge la liste et retrouve l'annonce de cette carte (nouvelle pour nous, ou
     déjà possédée pour l'achat-revente), au prix `limit` au plus."""
-    goto(page, market_path(rarity))
-    for _ in range(MAX_MORE_CLICKS + 1):
+    goto(page, market_path(rarity, name))  # recherche par nom : peu d'annonces à parcourir
+    for _ in range(6):
         cur = [x for x in collect_listings(page)
                if x["name"] == name and x["price"] <= limit
                and ((x["owned"] >= 1 and not x["is_new"]) if owned else x["is_new"])]
@@ -513,8 +526,7 @@ def locate_listing(page, rarity, name, limit, owned=False):
         more = page.get_by_role("button", name="Show more listings")
         if more.count() == 0:
             return None
-        press(more.first)
-        settle(page)
+        show_more(page, more)
     return None
 
 
