@@ -7,6 +7,10 @@ on:
         description: 'Marché : "true" = simulation, "false" = actions réelles, vide = variable MARKET_DRY_RUN'
         required: false
         default: ""
+      min_ratio:
+        description: 'Marché : points par essecoin minimum (test), vide = variable MARKET_MIN_RATIO ou 0.125'
+        required: false
+        default: ""
       force_market:
         description: 'Lancer le marché même sans booster ouvert ("true", pour tester)'
         required: false
@@ -49,6 +53,8 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run || vars.MARKET_DRY_RUN || 'true' }}
           # Mise en vente réelle des rares : MARKET_SELL_DRY_RUN = "false" (en plus de MARKET_DRY_RUN)
           SELL_DRY_RUN: ${{ vars.MARKET_SELL_DRY_RUN || 'true' }}
+          # Points par essecoin minimum pour acheter (commune 1 pt, rare 3, épique 8)
+          MIN_RATIO: ${{ inputs.min_ratio || vars.MARKET_MIN_RATIO || '0.125' }}
         run: python market.py
 
       - name: Save sell state

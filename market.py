@@ -44,7 +44,7 @@ RECYCLABLE = {"COMMON", "RARE", "EPIC"}  # on garde LEGENDARY et CREATOR
 # --- achats : valeur au classement (points par carte différente) ---------------
 POINTS = {"common": 1, "rare": 3, "epic": 8}
 MAX_PRICE = {"epic": 40, "rare": 25, "common": 15}  # achat si prix < seuil
-MIN_RATIO = 0.125  # points par essecoin minimum (0 pour ne garder que les seuils)
+MIN_RATIO = float(os.environ.get("MIN_RATIO", "0.125"))  # points/essecoin minimum (0 = seuils seuls)
 
 
 def worth(rarity, price):
