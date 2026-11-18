@@ -119,7 +119,7 @@ def pick_junk(items, min_value_pts):
     return None
 
 
-def trade_step(page, link, now):
+def trade_step(page, link, now, reserved=()):
     # 1. proposition en attente ?
     tr = link.get("trade")
     if tr:
@@ -149,7 +149,7 @@ def trade_step(page, link, now):
         return False
     value = sum(PTS.get(c["rarity"], 0) for c in wanted)
     M.goto(page, "/market/sell")
-    junk = pick_junk(M.scan_sell(page), value)
+    junk = pick_junk([it for it in M.scan_sell(page) if it["name"] not in reserved], value)
     if not junk:
         M.log("Échange : aucun doublon de peu de valeur à donner pour l'instant.")
         return False
@@ -196,14 +196,14 @@ def bait_step(page, data, link, now):
         write_json("bait.json", {"name": None})
         M.log("Annonce appât terminée (vendue ou retirée).")
     if bait_listed:
-        return False
+        return None
     if not feeder_alive(fb, now):
-        return False
+        return None
     if fb["at"] <= link.get("bait_closed_at", 0):
-        return False  # on attend un solde de Joss publié après le dernier appât
+        return None  # on attend un solde de Joss publié après le dernier appât
     balance = int(fb.get("balance", 0))
     if balance < BAIT_MIN:
-        return False
+        return None
     price = min(balance, BAIT_MAX)
     M.goto(page, "/market/sell")
     reserved = {link["trade"]["give"]} if link.get("trade") else set()
@@ -211,18 +211,18 @@ def bait_step(page, data, link, now):
     junk = pick_junk(items, 0)
     if not junk or junk["rarity"] == "EPIC":
         M.log("Appât : aucun doublon commun ou rare à mettre en vente.")
-        return False
+        return None
     txt = f"Appât : {junk['rarity']} « {junk['name']} » à {price} essecoins (solde de Joss : {balance})"
     if LINK_DRY_RUN:
         M.log(f"[SIMULATION] {txt}")
-        return False
+        return junk["name"]
     M.list_for_sale(page, junk, price)
     data["listings"].append({"name": junk["name"], "price": price, "listed_at": now, "bait": True})
     link["bait_open"] = True
     write_json("bait.json", {"name": junk["name"], "rarity": junk["rarity"], "price": price,
                              "listed_at": now})
     M.log(f"{txt} : mise en vente.")
-    return True
+    return junk["name"]
 
 
 def main_link(page):
@@ -235,8 +235,9 @@ def main_link(page):
         if not LINK_DRY_RUN and not feeder_alive(read_json("feeder.json"), now):
             M.log("Compte nourrisseur : Joss n'a pas publié son solde récemment, rien proposé.")
             return
-        trade_step(page, link, now)
-        bait_step(page, data, link, now)
+        # l'appât (des essecoins) passe avant l'échange : il réserve son doublon, l'échange prend un autre
+        bait = bait_step(page, data, link, now)
+        trade_step(page, link, now, reserved={bait} if bait else ())
         if json.dumps(data, sort_keys=True) != before:
             M.save_state(data)
     except SystemExit:
