@@ -67,8 +67,10 @@ se terminent dans les 6 minutes).
 - **Suivi du classement** : à chaque passage des enchères, le script `leaderboard.py` lit
   `/leaderboard` et, au plus toutes les 30 min, ajoute les 3 premiers (rang, points, cartes) et
   toi si tu n'es pas dans le top 3 au fichier `leaderboard.csv` de la branche `tracking`
-  (`git fetch origin tracking && git show origin/tracking:leaderboard.csv`). Le résumé de
-  l'évolution s'obtient avec `TRACK_CSV=leaderboard.csv python leaderboard.py --report`.
+  (`git fetch origin tracking && git show origin/tracking:leaderboard.csv`). Le rapport
+  (tes points/heure, ceux des autres, écart et durée estimée avant un éventuel rattrapage) est
+  dans `REPORT.md` sur la même branche, dans le résumé de chaque run des enchères, ou avec
+  `TRACK_CSV=leaderboard.csv python leaderboard.py --report`.
 
 Variables du dépôt (Settings > Secrets and variables > Actions > Variables) :
 
