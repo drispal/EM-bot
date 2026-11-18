@@ -390,16 +390,23 @@ def recycle_all(page, snapshot, no_sell):
 
 
 def verify_listings(page, names):
-    """Contrôle que les cartes mises en vente apparaissent bien dans « My cards on sale »."""
+    """Contrôle que les cartes mises en vente apparaissent bien dans « My cards on sale ».
+    Le site affiche cette liste avec du retard : on réessaie jusqu'à 3 fois (20 s d'écart)."""
     if not names:
         return
-    goto(page, "/market/mine")
-    current = {c["name"] for c in on_sale(page)}
+    missing = set(names)
+    for attempt in range(4):
+        goto(page, "/market/mine")
+        missing -= {c["name"] for c in on_sale(page)}
+        if not missing:
+            break
+        if attempt < 3:
+            page.wait_for_timeout(20000)
     for n in names:
-        if n in current:
-            log(f"Annonce « {n} » visible dans « My cards on sale ».")
+        if n in missing:
+            log(f"  ⚠ Annonce « {n} » introuvable dans « My cards on sale » (même après 60 s).")
         else:
-            log(f"  ⚠ Annonce « {n} » introuvable dans « My cards on sale ».")
+            log(f"Annonce « {n} » visible dans « My cards on sale ».")
 
 
 # ------------------------------------------------------------------ achats
