@@ -120,7 +120,6 @@ def main():
             auctions = read_auctions(page)
             if budget is None:
                 budget = M.balance(page) or 0
-            seen = {a["lid"] for a in auctions}
 
             # 1) nouvelles enchères intéressantes qui se terminent bientôt
             for a in auctions:

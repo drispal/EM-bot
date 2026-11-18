@@ -7,6 +7,7 @@
    - `open_booster.py` à la racine
    - `login_local.py` à la racine
    - `booster.yml` dans `.github/workflows/booster.yml`
+   - `market.py`, `auctions.py`, `requirements.txt` et `.github/actions/setup/action.yml`
    - un `.gitignore` contenant la ligne `storage_state.json`
 3. Sur ton ordinateur :
    ```
@@ -35,3 +36,34 @@
   pendant 60 jours : réactive-les dans l'onglet Actions si besoin.
 - Ne mets jamais de mot de passe ou de contenu de `storage_state.json` dans le
   code ou dans les logs.
+
+## Marché et enchères
+
+`market.py` tourne après chaque booster ouvert, `auctions.py` à chaque lancement
+(job séparé qui surveille les enchères qui se terminent dans les 6 minutes).
+
+- **Doublons** : EPIC et COMMON sont recyclées. Les RARE sont mises en vente à prix
+  fixe (un cran sous l'annonce la moins chère, entre 20 et 30 essecoins) ; si elles ne
+  sont pas vendues après 120 min (`SELL_TIMEOUT_MIN`), l'annonce est retirée et la
+  carte recyclée. Seules les annonces créées par le bot sont suivies (fichier
+  `sell_state.json`, conservé entre les runs avec `actions/cache`). LEGENDARY et
+  CREATOR ne sont jamais touchées. Une carte dont un exemplaire est déjà en vente ou
+  en échange n'est jamais recyclée.
+- **Achats** : cartes manquantes (« New for you ») classées par points au classement
+  par essecoin (commune 1, rare 3, épique 8), sous les seuils epic < 40, rare < 25,
+  common < 15 et avec au moins `MIN_RATIO` = 0,125 point par essecoin.
+- **Enchères** : dans la dernière minute, mise minimale autorisée par le site (≈ +5 %)
+  sur les cartes manquantes qui passent la même règle de prix ; remise si dépassé (4
+  mises max par enchère).
+
+Variables du dépôt (Settings > Secrets and variables > Actions > Variables) :
+
+| Variable | Effet |
+|---|---|
+| `MARKET_DRY_RUN` | `false` = recyclage et achats réels, sinon simulation |
+| `MARKET_SELL_DRY_RUN` | `false` en plus = mise en vente réelle des rares (sinon simulée, les rares sont recyclées) |
+| `MARKET_AUCTION_DRY_RUN` | `false` = mises réelles, sinon simulation |
+| `MARKET_MIN_RATIO` | points par essecoin minimum pour acheter (0,125 par défaut) |
+
+Le lancement manuel du workflow accepte `dry_run`, `min_ratio` et `force_market` pour
+tester sans toucher aux variables.
