@@ -1,0 +1,30 @@
+name: Setup Python and Playwright
+description: Python, Playwright and Chromium (browser cached between runs)
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: pip
+        cache-dependency-path: requirements.txt
+
+    - name: Install Playwright
+      shell: bash
+      run: pip install -r requirements.txt
+
+    - name: Cache Playwright browsers
+      id: pw-cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: pw-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+    - name: Install Chromium
+      shell: bash
+      run: |
+        if [ "${{ steps.pw-cache.outputs.cache-hit }}" = "true" ]; then
+          playwright install-deps chromium
+        else
+          playwright install --with-deps chromium
+        fi

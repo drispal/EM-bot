@@ -1,30 +1,66 @@
-"""Recyclage des doublons + achat des cartes manquantes sur Essec Masters.
+"""Marché Essec Masters : vente / recyclage des doublons, achat des cartes manquantes.
 
-1. Recyclage : sur /market/sell, bouton « Recycle N » SOUS chaque carte
-   (jamais le bouton général « Recycle N duplicates »). Seules les cartes
-   COMMON / RARE / EPIC sont recyclées ; LEGENDARY et CREATOR sont gardées.
-   Le jeu garde toujours un exemplaire de chaque carte.
-2. Achat : sur /market (annonces à prix fixe), on achète les cartes que
-   l'on n'a pas encore (« New for you ») si le prix est STRICTEMENT inférieur
-   au seuil de sa rareté : epic < 40, rare < 25, common < 15.
+1. Doublons (sur /market/sell, bouton « Recycle N » SOUS chaque carte, jamais le
+   bouton général « Recycle N duplicates »). Seules les COMMON / RARE / EPIC sont
+   concernées ; LEGENDARY et CREATOR ne sont jamais touchées. Une carte qui a déjà
+   un exemplaire en vente ou en échange n'est pas recyclée.
+   - EPIC et COMMON : recyclées (40 / 5 essecoins).
+   - RARE : mises en vente à prix fixe (bien plus que les 15 du recyclage) ; si la
+     carte n'est pas vendue après SELL_TIMEOUT_MIN minutes, l'annonce est retirée
+     puis la carte recyclée. Le script ne touche JAMAIS aux annonces qu'il n'a pas
+     créées lui-même (la liste est gardée dans sell_state.json).
+2. Achat : cartes que l'on n'a pas encore (« New for you »), à prix fixe. On vise la
+   valeur au classement (commune 1 pt, rare 3, épique 8) : on achète d'abord les
+   meilleures « points par essecoin », et seulement si le prix reste sous le seuil
+   de la rareté (epic < 40, rare < 25, common < 15) et si le ratio est >= MIN_RATIO.
 
-Mode simulation (DRY_RUN) : par défaut, rien n'est cliqué, le script affiche
-ce qu'il ferait. Mettre DRY_RUN=false pour agir pour de vrai.
+Interrupteurs (variables d'environnement) :
+  DRY_RUN          "false" pour agir pour de vrai, sinon simulation (rien n'est cliqué).
+  SELL_DRY_RUN     "false" en plus pour mettre réellement les rares en vente ; sinon
+                   la mise en vente est seulement simulée et les rares sont recyclées.
 """
 import json
 import os
 import re
 import sys
+import time
 
 from playwright.sync_api import sync_playwright
 
 BASE = "https://www.essecmasters.com"
-DRY_RUN = os.environ.get("DRY_RUN", "true").strip().lower() != "false"
+
+
+def flag(name, default="true"):
+    """Interrupteur : vrai sauf si la variable vaut exactement « false »."""
+    return os.environ.get(name, default).strip().lower() != "false"
+
+
+DRY_RUN = flag("DRY_RUN")
+SELL_DRY_RUN = DRY_RUN or flag("SELL_DRY_RUN")
 
 RARITIES = {"COMMON", "RARE", "EPIC", "LEGENDARY", "CREATOR"}
 RECYCLABLE = {"COMMON", "RARE", "EPIC"}  # on garde LEGENDARY et CREATOR
+
+# --- achats : valeur au classement (points par carte différente) ---------------
+POINTS = {"common": 1, "rare": 3, "epic": 8}
 MAX_PRICE = {"epic": 40, "rare": 25, "common": 15}  # achat si prix < seuil
-BUY_ORDER = ["epic", "rare", "common"]
+MIN_RATIO = 0.125  # points par essecoin minimum (0 pour ne garder que les seuils)
+
+
+def worth(rarity, price):
+    """Prix acceptable pour cette rareté (sous le seuil ET assez de points par essecoin)."""
+    r = rarity.lower()
+    return r in POINTS and 0 < price < MAX_PRICE[r] and POINTS[r] / price >= MIN_RATIO
+
+
+# prix maximum accepté par rareté (déduit de worth)
+PRICE_LIMIT = {r: max((p for p in range(1, MAX_PRICE[r]) if worth(r, p)), default=0) for r in POINTS}
+
+# --- ventes de doublons ----------------------------------------------------------
+SELL_RARITIES = {"RARE"}
+SELL_MIN, SELL_MAX, SELL_DEFAULT = 20, 30, 26  # prix de vente d'une rare (essecoins)
+SELL_TIMEOUT_MIN = int(os.environ.get("SELL_TIMEOUT_MIN", "120"))
+STATE_FILE = os.environ.get("SELL_STATE_FILE", "sell_state.json")
 
 MAX_RECYCLES = 100  # garde-fous par exécution
 MAX_MORE_CLICKS = 6
@@ -44,10 +80,18 @@ def write_summary(title):
     if not path:
         return
     mode = "SIMULATION (rien n'a été cliqué)" if DRY_RUN else "ACTIONS RÉELLES"
+    sell = "vente simulée" if SELL_DRY_RUN else "vente réelle"
     with open(path, "a", encoding="utf-8") as f:
-        f.write(f"## {title} : {mode}\n")
+        f.write(f"## {title} : {mode} ({sell})\n")
         for line in report or ["Rien à faire."]:
             f.write(f"- {line}\n")
+
+
+def set_output(key, value):
+    path = os.environ.get("GITHUB_OUTPUT")
+    if path:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"{key}={value}\n")
 
 
 # ---------------------------------------------------------------- parsing
@@ -114,19 +158,21 @@ def settle(page):
     page.wait_for_timeout(1500)
 
 
-def history_amounts(page, kind, name):
-    """Montants (signés) des lignes « <kind> · <name> » de l'historique d'essecoins.
-    L'historique est à jour tout de suite, contrairement au solde affiché."""
-    return amounts_in(history_text(page), kind, name)
+def press(locator):
+    try:
+        locator.click(timeout=8000)
+    except Exception:  # noqa: BLE001
+        locator.dispatch_event("click")
 
 
+# ------------------------------------------------- historique des essecoins
 def history_text(page):
-    page.goto(BASE + "/market/mine", wait_until="networkidle")
-    page.wait_for_timeout(800)
+    goto(page, "/market/mine")
     return page.locator("main").inner_text()
 
 
 def amounts_in(text, kind, name):
+    """Montants (signés) des lignes « <kind> · <name> » de l'historique, plus récent en haut."""
     pat = rf"{re.escape(kind)} · {re.escape(name)}\s*\n\s*\d{{1,2}}/\d{{1,2}}/\d{{4}}\s*\n\s*([+\-−–]\s*\d+)"
     out = []
     for m in re.findall(pat, text):
@@ -134,18 +180,11 @@ def amounts_in(text, kind, name):
     return out
 
 
-def confirm_action(page, kind, name, count_before):
-    """Attend qu'une nouvelle ligne d'historique apparaisse. Renvoie son montant ou None."""
-    for _ in range(8):
-        amounts = history_amounts(page, kind, name)
-        if len(amounts) > count_before:
-            return amounts[0]  # la plus récente est en haut
-        page.wait_for_timeout(2000)
-    return None
-
-
-def add_pending(kind, name, n_before):
-    pending.append({"kind": kind, "name": name, "n_before": n_before, "confirmed": False})
+def add_pending(kind, name, snapshot):
+    """Action cliquée, à retrouver dans l'historique (comparé à l'instantané pris au départ)."""
+    n_before = len(amounts_in(snapshot, kind, name)) if snapshot else 0
+    pending.append({"kind": kind, "name": name, "n_before": n_before,
+                    "confirmed": False, "t": time.time()})
 
 
 def check_pending(page):
@@ -158,92 +197,215 @@ def check_pending(page):
 
 
 def guard(page):
-    """Le site met parfois du temps à afficher l'historique. Si, après plusieurs actions,
-    aucune n'y est visible, on arrête (les clics ne semblent pas avoir d'effet)."""
+    """Le site affiche l'historique avec du retard. Si, longtemps après plusieurs actions,
+    aucune n'y est visible, on arrête (les clics semblent sans effet)."""
     waiting = [p for p in pending if not p["confirmed"]]
-    if len(waiting) >= 3 and check_pending(page) == 0:
+    if len(waiting) >= 4 and time.time() - waiting[0]["t"] > 90 and check_pending(page) == 0:
         log("Aucune des dernières actions n'apparaît dans l'historique : arrêt du marché.")
         state["halt"] = True
 
 
-def press(locator):
+# ---------------------------------------------- mémoire des annonces créées
+def load_state():
     try:
-        locator.click(timeout=8000)
-    except Exception:  # noqa: BLE001
-        locator.dispatch_event("click")
+        with open(STATE_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data.get("listings"), list):
+            return data
+    except (OSError, ValueError):
+        pass
+    return {"listings": []}
 
 
-# -------------------------------------------------------------- recyclage
-def eligible_recycles(page):
-    """Cartes avec un bouton « Recycle N » individuel, de rareté recyclable."""
-    tiles = page.locator("main div.grid > div")
-    found = []
-    for i in range(tiles.count()):
-        tile = tiles.nth(i)
-        btn = tile.get_by_role("button", name=re.compile(r"^Recycle \d+"))
-        if btn.count() == 0 or "duplicates" in btn.first.inner_text():
+def save_state(data):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+    set_output("state_changed", "true")
+
+
+# ------------------------------------------------------ annonces en cours
+ON_SALE_JS = r"""() => [...document.querySelectorAll("main form")]
+  .filter(f => f.querySelector("input[name='listingId']")
+    && [...f.querySelectorAll('button')].some(b => b.innerText.trim() === 'Withdraw'))
+  .map(f => {
+    let el = f;
+    while (el.parentElement && el.parentElement.tagName !== 'MAIN'
+           && el.parentElement.querySelectorAll("input[name='listingId']").length === 1) {
+      el = el.parentElement;
+    }
+    return {lid: f.querySelector("input[name='listingId']").value, text: el.innerText};
+  })"""
+
+
+def on_sale(page):
+    """Annonces à prix fixe de /market/mine (la page doit déjà être chargée)."""
+    out = []
+    for it in page.evaluate(ON_SALE_JS):
+        if "fixed price" not in it["text"].lower():
+            continue
+        info = parse_listing(it["text"])
+        if info and info["name"]:
+            info["lid"] = it["lid"]
+            out.append(info)
+    return out
+
+
+def withdraw(page, lid):
+    press(page.locator(f"main form:has(input[name='listingId'][value='{lid}'])")
+          .get_by_role("button", name="Withdraw", exact=True))
+    settle(page)
+
+
+def manage_listings(page):
+    """Retire (puis laisse recycler) les annonces créées par le script qui n'ont pas été
+    vendues dans le délai. Renvoie l'ensemble des noms retirés."""
+    data = load_state()
+    withdrawn = set()
+    if not data["listings"]:
+        return withdrawn
+    goto(page, "/market/mine")
+    current = on_sale(page)
+    keep, now = [], time.time()
+    for e in data["listings"]:
+        cur = next((c for c in current if c["name"] == e["name"]), None)
+        if cur is None:
+            log(f"Annonce « {e['name']} » terminée (vendue ou retirée).")
+            continue
+        age = int((now - e["listed_at"]) / 60)
+        if age < SELL_TIMEOUT_MIN:
+            log(f"Annonce « {e['name']} » à {cur['price']} essecoins : en vente depuis {age} min.")
+            keep.append(e)
+        elif SELL_DRY_RUN:
+            log(f"[SIMULATION] Retirer l'annonce « {e['name']} » ({age} min sans vente) puis recycler.")
+            keep.append(e)
+        else:
+            withdraw(page, cur["lid"])
+            withdrawn.add(e["name"])
+            log(f"Annonce « {e['name']} » retirée ({age} min sans vente) : la carte sera recyclée.")
+    if len(keep) != len(data["listings"]) or withdrawn:
+        data["listings"] = keep
+        save_state(data)
+    return withdrawn
+
+
+# ----------------------------------------------------- doublons : vendre / recycler
+SELL_TILES_JS = r"""() => [...document.querySelectorAll('main div.grid > div')].map(t => {
+  const rb = [...t.querySelectorAll('button')].find(b => /^Recycle \d+/.test(b.innerText.trim()));
+  return {text: t.innerText, recycle: rb ? rb.innerText.replace(/\s+/g, ' ').trim() : null};
+})"""
+
+
+def scan_sell(page):
+    """Cartes avec un bouton « Recycle N » individuel (un seul appel au navigateur)."""
+    out = []
+    for i, t in enumerate(page.evaluate(SELL_TILES_JS)):
+        label = t["recycle"]
+        if not label or "duplicates" in label:
             continue  # jamais le bouton général
-        lines = tile_lines(tile.inner_text())
+        lines = tile_lines(t["text"])
         rarity = tile_rarity(lines)
         if rarity not in RECYCLABLE:
             continue
-        found.append({"idx": i, "rarity": rarity, "name": tile_name(lines, rarity),
-                      "label": " ".join(btn.first.inner_text().split())})
-    return found
+        text = t["text"]
+        m_last = re.search(r"last sold\s+(\d+)", text, re.I)
+        m_cheap = re.search(r"cheapest now\s+(\d+)", text, re.I)
+        m_gain = re.search(r"\+\s*(\d+)", label)
+        out.append({
+            "idx": i, "rarity": rarity, "name": tile_name(lines, rarity), "label": label,
+            "gain": int(m_gain.group(1)) if m_gain else 0,
+            "on_market": "on the market or in a trade" in text.lower(),
+            "last_sold": int(m_last.group(1)) if m_last else None,
+            "cheapest": int(m_cheap.group(1)) if m_cheap else None,
+        })
+    return out
 
 
-def recycle_all(page):
+def sell_price(it):
+    ref = it["cheapest"] or it["last_sold"]
+    if not ref:
+        return SELL_DEFAULT
+    return max(SELL_MIN, min(SELL_MAX, ref - 1))  # un cran sous l'annonce la moins chère
+
+
+def list_for_sale(page, it, price):
+    tile = page.locator("main div.grid > div").nth(it["idx"])
+    tile.locator("input[name='kind'][value='fixed']").check()
+    tile.locator("input[name='price']").fill(str(price))
+    press(tile.get_by_role("button", name="Put up for sale", exact=True))
+    settle(page)
+
+
+def recycle_all(page, snapshot, no_sell):
     goto(page, "/market/sell")
     start = balance(page)
-    gain_sim = 0
-    skipped = set()
-    done = 0
+    handled = set()
+    gain_total = 0
+    recycled = listed = 0
+    data = load_state()
     for _ in range(MAX_RECYCLES):
-        items = [it for it in eligible_recycles(page) if it["name"] not in skipped]
+        if state["halt"]:
+            break
+        items = [it for it in scan_sell(page)
+                 if it["name"] and it["name"] not in handled and not it["on_market"]]
         if not items:
             break
-        if DRY_RUN:
+        if DRY_RUN:  # simulation complète : on liste tout, sans cliquer
             for it in items:
-                log(f"[SIMULATION] Recycler {it['rarity']} « {it['name']} » ({it['label']})")
-                m = re.search(r"\+\s*(\d+)", it["label"])
-                gain_sim += int(m.group(1)) if m else 0
+                if it["rarity"] in SELL_RARITIES and it["name"] not in no_sell:
+                    log(f"[SIMULATION] Mettre en vente {it['rarity']} « {it['name']} » à {sell_price(it)} "
+                        f"(last sold {it['last_sold']} · cheapest now {it['cheapest']}), "
+                        f"sinon recyclage après {SELL_TIMEOUT_MIN} min")
+                else:
+                    log(f"[SIMULATION] Recycler {it['rarity']} « {it['name']} » ({it['label']})")
+                gain_total += it["gain"]
             break
         it = items[0]
-        n_before = len(history_amounts(page, "Duplicate recycled", it["name"]))
-        goto(page, "/market/sell")
-        # l'index peut avoir changé : on retrouve la carte par son nom
-        items = [x for x in eligible_recycles(page) if x["name"] == it["name"]]
-        if not items:
-            skipped.add(it["name"])
-            continue
-        it = items[0]
+        handled.add(it["name"])
+        if it["rarity"] in SELL_RARITIES and it["name"] not in no_sell:
+            price = sell_price(it)
+            if SELL_DRY_RUN:
+                log(f"[SIMULATION] Mettre en vente {it['rarity']} « {it['name']} » à {price} "
+                    f"(last sold {it['last_sold']} · cheapest now {it['cheapest']}), "
+                    f"sinon recyclage après {SELL_TIMEOUT_MIN} min. En attendant : recyclage.")
+            else:
+                list_for_sale(page, it, price)
+                data["listings"].append({"name": it["name"], "price": price, "listed_at": time.time()})
+                save_state(data)
+                listed += 1
+                log(f"Mis en vente {it['rarity']} « {it['name']} » à {price} essecoins "
+                    f"(last sold {it['last_sold']} · cheapest now {it['cheapest']}), "
+                    f"recyclage si invendu après {SELL_TIMEOUT_MIN} min.")
+                goto(page, "/market/sell")
+                continue
         press(page.locator("main div.grid > div").nth(it["idx"])
               .get_by_role("button", name=re.compile(r"^Recycle \d+")).first)
         settle(page)
-        gain = confirm_action(page, "Duplicate recycled", it["name"], n_before)
+        add_pending("Duplicate recycled", it["name"], snapshot)
+        recycled += 1
+        gain_total += it["gain"]
+        log(f"Recyclage envoyé {it['rarity']} « {it['name']} » (≈ +{it['gain']} essecoins)")
+        guard(page)
         goto(page, "/market/sell")
-        skipped.add(it["name"])  # jamais deux fois la même carte dans un run
-        done += 1
-        if gain is not None and gain > 0:
-            log(f"Recyclé {it['rarity']} « {it['name']} » : +{gain} essecoins")
-            add_pending("Duplicate recycled", it["name"], n_before)
-            pending[-1]["confirmed"] = True
+    return (start or 0) + gain_total, start, recycled, listed
+
+
+def verify_listings(page, names):
+    """Contrôle que les cartes mises en vente apparaissent bien dans « My cards on sale »."""
+    if not names:
+        return
+    goto(page, "/market/mine")
+    current = {c["name"] for c in on_sale(page)}
+    for n in names:
+        if n in current:
+            log(f"Annonce « {n} » visible dans « My cards on sale ».")
         else:
-            m = re.search(r"\+\s*(\d+)", it["label"])
-            log(f"Recyclage envoyé {it['rarity']} « {it['name']} » (≈ +{m.group(1) if m else '?'} essecoins), "
-                "pas encore visible dans l'historique.")
-            add_pending("Duplicate recycled", it["name"], n_before)
-            guard(page)
-            if state["halt"]:
-                break
-    end = balance(page) if not DRY_RUN else start
-    return (start or 0) + gain_sim if DRY_RUN else (end or 0), start, done
+            log(f"  ⚠ Annonce « {n} » introuvable dans « My cards on sale ».")
 
 
 # ------------------------------------------------------------------ achats
 BUY_FORMS = "main form:has(input[name='listingId']):has(button:text-is('Buy'))"
 
-LISTINGS_JS = """() => [...document.querySelectorAll("main form")]
+LISTINGS_JS = r"""() => [...document.querySelectorAll("main form")]
   .filter(f => f.querySelector("input[name='listingId']")
     && [...f.querySelectorAll('button')].some(b => b.innerText.trim() === 'Buy'))
   .map(f => {
@@ -266,12 +428,43 @@ def collect_listings(page):
     return out
 
 
-def locate_listing(page, path, name, limit):
+def market_path(rarity):
+    return f"/market?rarity={rarity}&kind=fixed&sort=price"
+
+
+def gather(page, rarity, bought):
+    """Annonces « New for you » de cette rareté qui valent le coup (triées par prix)."""
+    limit = PRICE_LIMIT[rarity]
+    if limit <= 0:
+        return []
+    goto(page, market_path(rarity))
+    more_clicks = 0
+    while True:
+        listings = collect_listings(page)
+        more = page.get_by_role("button", name="Show more listings")
+        last_price = listings[-1]["price"] if listings else None
+        if more.count() == 0 or more_clicks >= MAX_MORE_CLICKS \
+                or (last_price is not None and last_price > limit):
+            break
+        press(more.first)
+        more_clicks += 1
+        settle(page)
+    seen, out = set(), []
+    for l in listings:
+        if l["is_new"] and l["rarity"].lower() == rarity and l["price"] <= limit \
+                and l["name"] not in bought and l["name"] not in seen:
+            seen.add(l["name"])
+            out.append({"rarity": rarity, "name": l["name"], "price": l["price"]})
+    return out
+
+
+def locate_listing(page, rarity, name):
     """Recharge la liste et retrouve l'annonce « New for you » de cette carte."""
-    goto(page, path)
+    limit = PRICE_LIMIT[rarity]
+    goto(page, market_path(rarity))
     for _ in range(MAX_MORE_CLICKS + 1):
         cur = [x for x in collect_listings(page)
-               if x["name"] == name and x["is_new"] and x["price"] < limit]
+               if x["name"] == name and x["is_new"] and x["price"] <= limit]
         if cur:
             return cur[0]
         more = page.get_by_role("button", name="Show more listings")
@@ -282,62 +475,41 @@ def locate_listing(page, path, name, limit):
     return None
 
 
-def buy_rarity(page, rarity, budget, bought):
-    limit = MAX_PRICE[rarity]
-    path = f"/market?rarity={rarity}&kind=fixed&sort=price"
-    goto(page, path)
+def buy_all(page, budget, snapshot):
+    bought = set()
+    if budget <= 0:
+        return budget, 0
+    cands = []
+    for rarity in POINTS:
+        cands += gather(page, rarity, bought)
+    # meilleurs « points par essecoin » d'abord (puis plus de points, puis moins cher)
+    cands.sort(key=lambda c: (-POINTS[c["rarity"]] / c["price"], -POINTS[c["rarity"]], c["price"]))
     purchases = 0
-    while True:  # s'arrête quand plus rien d'achetable (budget, seuil, échecs)
+    for c in cands:
         if state["halt"]:
             break
-        more_clicks = 0
-        while True:
-            listings = collect_listings(page)
-            cands = [l for l in listings
-                     if l["is_new"] and l["rarity"].lower() == rarity
-                     and l["price"] < limit and l["price"] <= budget
-                     and l["name"] not in bought]
-            more = page.get_by_role("button", name="Show more listings")
-            last_price = listings[-1]["price"] if listings else None
-            if cands or more.count() == 0 or more_clicks >= MAX_MORE_CLICKS \
-                    or (last_price is not None and last_price >= limit):
-                break
-            press(more.first)
-            more_clicks += 1
-            settle(page)
-        if not cands:
-            break
-        if DRY_RUN:
-            for c in cands:
-                if c["price"] <= budget and c["name"] not in bought:
-                    log(f"[SIMULATION] Acheter {rarity.upper()} « {c['name']} » à {c['price']} essecoins")
-                    budget -= c["price"]
-                    bought.add(c["name"])
-                    purchases += 1
-            break
-        c = cands[0]
-        n_before = len(history_amounts(page, "Card bought", c["name"]))
-        name_c = c["name"]
-        c = locate_listing(page, path, name_c, limit)
-        if c is None:
-            bought.add(name_c)  # plus disponible (vendue ou déjà possédée)
+        if c["price"] > budget or c["name"] in bought:
             continue
-        press(page.locator(BUY_FORMS).nth(c["idx"]).get_by_role("button", name="Buy", exact=True))
-        settle(page)
-        paid = confirm_action(page, "Card bought", c["name"], n_before)
+        pts = POINTS[c["rarity"]]
+        if DRY_RUN:
+            log(f"[SIMULATION] Acheter {c['rarity'].upper()} « {c['name']} » à {c['price']} essecoins "
+                f"({pts} pt, {pts / c['price']:.2f} pt/essecoin)")
+            budget -= c["price"]
+            bought.add(c["name"])
+            purchases += 1
+            continue
+        found = locate_listing(page, c["rarity"], c["name"])
         bought.add(c["name"])
-        add_pending("Card bought", c["name"], n_before)
+        if found is None:
+            continue  # plus disponible (vendue ou déjà possédée)
+        press(page.locator(BUY_FORMS).nth(found["idx"]).get_by_role("button", name="Buy", exact=True))
+        settle(page)
+        add_pending("Card bought", c["name"], snapshot)
+        budget -= found["price"]
         purchases += 1
-        if paid is not None and paid < 0:
-            pending[-1]["confirmed"] = True
-            budget -= -paid
-            log(f"Acheté {rarity.upper()} « {c['name']} » à {-paid} essecoins")
-        else:
-            budget -= c["price"]  # on suppose l'achat passé (prix de l'annonce)
-            log(f"Achat envoyé {rarity.upper()} « {c['name']} » à {c['price']} essecoins, "
-                "pas encore visible dans l'historique.")
-            guard(page)
-        goto(page, path)
+        log(f"Achat envoyé {c['rarity'].upper()} « {c['name']} » à {found['price']} essecoins "
+            f"({pts} pt, {pts / found['price']:.2f} pt/essecoin)")
+        guard(page)
     return budget, purchases
 
 
@@ -345,23 +517,27 @@ def main():
     raw = os.environ.get("ESSEC_STORAGE_STATE")
     if not raw:
         sys.exit("Secret ESSEC_STORAGE_STATE manquant.")
-    state = json.loads(raw)
+    session = json.loads(raw)
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        context = browser.new_context(storage_state=state, locale="en-US",
+        context = browser.new_context(storage_state=session, locale="en-US",
                                       viewport={"width": 1280, "height": 900})
         page = context.new_page()
         page.on("dialog", lambda d: d.accept())  # confirmations éventuelles
 
-        budget, start, recycled = recycle_all(page)
-        bought = set()
-        total_buys = 0
-        for rarity in BUY_ORDER:
-            budget, n = buy_rarity(page, rarity, budget, bought)
-            total_buys += n
+        # instantané de l'historique avant d'agir : sert de référence à la vérification finale
+        snapshot = None if DRY_RUN else history_text(page)
+
+        withdrawn = manage_listings(page)
+        budget, start, recycled, listed = recycle_all(page, snapshot, withdrawn)
+        budget, purchases = buy_all(page, budget, snapshot)
+
+        if listed:
+            verify_listings(page, [e["name"] for e in load_state()["listings"]])
 
         if pending:  # vérification finale : l'historique peut avoir du retard
+            ok = 0
             for attempt in range(4):
                 ok = check_pending(page)
                 if ok == len(pending):
@@ -374,7 +550,8 @@ def main():
                     log(f"  ⚠ « {p_['name']} » ({p_['kind']}) toujours absent de l'historique.")
         goto(page, "/market")
         final = balance(page)
-        log(f"Solde : {start} -> {final} essecoins ({recycled} recyclage(s), {total_buys} achat(s))")
+        log(f"Solde : {start} -> {final} essecoins ({recycled} recyclage(s), {listed} mise(s) en vente, "
+            f"{purchases} achat(s))")
         browser.close()
     write_summary("Marché")
 

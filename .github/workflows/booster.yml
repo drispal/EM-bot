@@ -2,26 +2,27 @@ name: Open Essec Masters booster
 
 on:
   workflow_dispatch:
-
-concurrency:
-  group: booster
-  cancel-in-progress: false
+    inputs:
+      dry_run:
+        description: 'Marché : "true" = simulation, "false" = actions réelles, vide = variable MARKET_DRY_RUN'
+        required: false
+        default: ""
+      force_market:
+        description: 'Lancer le marché même sans booster ouvert ("true", pour tester)'
+        required: false
+        default: "false"
 
 jobs:
   open:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      group: booster
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Playwright
-        run: |
-          pip install playwright
-          playwright install --with-deps chromium
+      - uses: ./.github/actions/setup
 
       - name: Open booster
         id: booster
@@ -29,11 +30,49 @@ jobs:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
         run: python open_booster.py
 
-      - name: Market (recycle duplicates, buy missing cards)
-        if: steps.booster.outputs.opened == 'true'
+      # Mémoire des annonces créées par le bot (sert à recycler après le délai)
+      - name: Restore sell state
+        if: steps.booster.outputs.opened == 'true' || inputs.force_market == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: sell_state.json
+          key: sell-state-${{ github.run_id }}
+          restore-keys: sell-state-
+
+      - name: Market (sell/recycle duplicates, buy missing cards)
+        id: market
+        if: steps.booster.outputs.opened == 'true' || inputs.force_market == 'true'
         continue-on-error: true
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
           # Simulation tant que la variable MARKET_DRY_RUN n'est pas "false"
-          DRY_RUN: ${{ vars.MARKET_DRY_RUN || 'true' }}
+          DRY_RUN: ${{ inputs.dry_run || vars.MARKET_DRY_RUN || 'true' }}
+          # Mise en vente réelle des rares : MARKET_SELL_DRY_RUN = "false" (en plus de MARKET_DRY_RUN)
+          SELL_DRY_RUN: ${{ vars.MARKET_SELL_DRY_RUN || 'true' }}
         run: python market.py
+
+      - name: Save sell state
+        if: always() && steps.market.outputs.state_changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: sell_state.json
+          key: sell-state-${{ github.run_id }}-${{ github.run_attempt }}
+
+  auctions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    concurrency:
+      group: auctions
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+
+      - name: Auctions (minimum bid in the last minute)
+        continue-on-error: true
+        env:
+          ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
+          # Simulation tant que la variable MARKET_AUCTION_DRY_RUN n'est pas "false"
+          AUCTION_DRY_RUN: ${{ vars.MARKET_AUCTION_DRY_RUN || 'true' }}
+        run: python auctions.py
