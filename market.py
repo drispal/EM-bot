@@ -108,7 +108,7 @@ FLIP_LIMIT = {r: RECYCLE_VALUE[r] - FLIP_MIN_PROFIT[r] for r in RECYCLE_VALUE}
 MAX_FLIPS = 20  # garde-fou par exécution
 
 # --- ventes de doublons ----------------------------------------------------------
-SELL_RARITIES = {"RARE", "EPIC"}
+SELL_RARITIES = set() if FEEDER else {"RARE", "EPIC"}  # Joss ne met rien en vente : il recycle
 # (prix minimum, prix maximum, prix par défaut) en essecoins ; le recyclage rapporte 15 / 40
 SELL_BOUNDS = {"RARE": (20, 30, 26), "EPIC": (50, 62, 60)}
 SELL_TIMEOUT_MIN = int(os.environ.get("SELL_TIMEOUT_MIN", "120"))
