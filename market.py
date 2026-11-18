@@ -46,7 +46,6 @@ def flag(name, default="true"):
 
 DRY_RUN = flag("DRY_RUN")
 SELL_DRY_RUN = DRY_RUN or flag("SELL_DRY_RUN")
-KEEP_SPARE = 0  # doublons communs/rares à garder pour le compte nourrisseur (fixé par link.main_link)
 FEEDER = flag("FEEDER", "false")  # compte nourrisseur (Joss) : il ne fait que vendre / recycler
 
 RARITIES = {"COMMON", "RARE", "EPIC", "LEGENDARY", "CREATOR"}
@@ -412,7 +411,7 @@ def list_for_sale(page, it, price):
     settle(page)
 
 
-def recycle_all(page, snapshot, no_sell):
+def recycle_all(page, snapshot, no_sell, keep_spare=0):
     """Vend (RARE / EPIC) ou recycle les doublons."""
     goto(page, "/market/sell")
     start = balance(page)
@@ -426,7 +425,7 @@ def recycle_all(page, snapshot, no_sell):
         items = [it for it in scan_sell(page)
                  if it["name"] and it["name"] not in handled and not it["on_market"]]
         spare = sorted((it for it in items if it["rarity"] in ("COMMON", "RARE")),
-                       key=lambda it: it["rarity"] != "COMMON")[:KEEP_SPARE]
+                       key=lambda it: it["rarity"] != "COMMON")[:keep_spare]
         keep = {it["name"] for it in spare}
         items = [it for it in items if it["name"] not in keep]
         if not items:
@@ -744,10 +743,11 @@ def main():
         snapshot = None if DRY_RUN else history_text(page)
 
         withdrawn = manage_listings(page)
+        keep_spare = 0
         if not FEEDER:
             import link  # compte nourrisseur : échange + annonce appât, avant le recyclage des doublons
-            link.main_link(page)
-        r1 = recycle_all(page, snapshot, withdrawn)
+            keep_spare = link.main_link(page)  # + doublons à garder en réserve pour Joss
+        r1 = recycle_all(page, snapshot, withdrawn, keep_spare)
         start, recycled, listed = r1["start"], r1["recycled"], r1["listed"]
         # Budget = solde déjà crédité. Les recyclages de ce passage ne sont pas comptés :
         # le site les crédite avec du retard et un achat serait refusé faute de solde

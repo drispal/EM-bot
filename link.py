@@ -243,7 +243,8 @@ def spares_needed(link, data, now):
 
 
 def main_link(page):
-    """Appelé par market.py (compte principal) avant le recyclage des doublons."""
+    """Appelé par market.py (compte principal) avant le recyclage des doublons.
+    Renvoie le nombre de doublons communs/rares à ne pas recycler (réserve pour Joss)."""
     try:
         data = M.load_state()
         link = data.setdefault("link", {})
@@ -251,19 +252,21 @@ def main_link(page):
         now = time.time()
         if not LINK_DRY_RUN and not feeder_alive(read_json("feeder.json"), now):
             M.log("Compte nourrisseur : Joss n'a pas publié son solde récemment, rien proposé.")
-            return
+            return 0
         # l'appât (des essecoins) passe avant l'échange : il réserve son doublon, l'échange prend un autre
         bait = bait_step(page, data, link, now)
         trade_step(page, link, now, reserved={bait} if bait else ())
-        M.KEEP_SPARE = spares_needed(link, data, now)
-        if M.KEEP_SPARE:
-            M.log(f"Réserve : {M.KEEP_SPARE} doublon(s) commun(s)/rare(s) gardé(s) pour Joss (non recyclés).")
+        spare = spares_needed(link, data, now)
+        if spare:
+            M.log(f"Réserve : {spare} doublon(s) commun(s)/rare(s) gardé(s) pour Joss (non recyclés).")
         if json.dumps(data, sort_keys=True) != before:
             M.save_state(data)
+        return spare
     except SystemExit:
         raise
     except Exception as exc:  # noqa: BLE001  (le compte nourrisseur ne doit jamais bloquer le marché)
         M.log(f"Compte nourrisseur : erreur ignorée ({type(exc).__name__}: {str(exc)[:120]}).")
+    return 0
 
 
 # ------------------------------------------------------------ côté Joss
