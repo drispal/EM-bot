@@ -43,16 +43,23 @@
 soit disponible ou non (`auctions.py` est un job séparé qui surveille les enchères qui
 se terminent dans les 6 minutes).
 
-- **Doublons** : EPIC et COMMON sont recyclées. Les RARE sont mises en vente à prix
-  fixe (un cran sous l'annonce la moins chère, entre 20 et 30 essecoins) ; si elles ne
-  sont pas vendues après 120 min (`SELL_TIMEOUT_MIN`), l'annonce est retirée et la
-  carte recyclée. Seules les annonces créées par le bot sont suivies (fichier
+- **Doublons** : les COMMON sont recyclées. Les RARE (20 à 30 essecoins) et les EPIC
+  (50 à 75) sont mises en vente à prix fixe, un cran sous l'annonce la moins chère ; si
+  elles ne sont pas vendues après 120 min (`SELL_TIMEOUT_MIN`), l'annonce est retirée et
+  la carte recyclée. Seules les annonces créées par le bot sont suivies (fichier
   `sell_state.json`, conservé entre les runs avec `actions/cache`). LEGENDARY et
-  CREATOR ne sont jamais touchées. Une carte dont un exemplaire est déjà en vente ou
-  en échange n'est jamais recyclée.
+  CREATOR ne sont jamais recyclées ni vendues. Une carte dont un exemplaire est déjà en
+  vente ou en échange n'est jamais recyclée.
+- **Achat-revente** : une annonce d'une carte que l'on a déjà, à un prix inférieur à sa
+  valeur de recyclage (au moins 2 essecoins de gain pour une commune, 3 pour une rare,
+  5 pour une épique), est achetée puis recyclée aussitôt (20 par exécution au maximum).
 - **Achats** : cartes manquantes (« New for you ») classées par points au classement
-  par essecoin (commune 1, rare 3, épique 8), sous les seuils epic ≤ 60, rare < 25,
-  common < 15 et avec au moins `MIN_RATIO` = 0,125 point par essecoin.
+  par essecoin (commune 1, rare 3, épique 8, légendaire 20), sous les seuils common < 15,
+  rare < 25, epic ≤ 60, legendary ≤ 150 et avec au moins `MIN_RATIO` = 0,125 point par
+  essecoin. Si une carte intéressante n'est pas encore abordable, le bot met de côté au
+  lieu de dépenser pour des cartes moins rentables. Si le solde dépasse `IDLE_BALANCE`
+  (100), le ratio minimum descend à `RELAXED_RATIO` (0,06) en gardant `RESERVE` (60)
+  essecoins, pour ne pas laisser dormir l'argent.
 - **Enchères** : dans la dernière minute, mise minimale autorisée par le site (≈ +5 %)
   sur les cartes manquantes qui passent la même règle de prix ; remise si dépassé (4
   mises max par enchère).

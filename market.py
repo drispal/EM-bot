@@ -2,22 +2,28 @@
 
 1. Doublons (sur /market/sell, bouton « Recycle N » SOUS chaque carte, jamais le
    bouton général « Recycle N duplicates »). Seules les COMMON / RARE / EPIC sont
-   concernées ; LEGENDARY et CREATOR ne sont jamais touchées. Une carte qui a déjà
-   un exemplaire en vente ou en échange n'est pas recyclée.
-   - EPIC et COMMON : recyclées (40 / 5 essecoins).
-   - RARE : mises en vente à prix fixe (bien plus que les 15 du recyclage) ; si la
-     carte n'est pas vendue après SELL_TIMEOUT_MIN minutes, l'annonce est retirée
-     puis la carte recyclée. Le script ne touche JAMAIS aux annonces qu'il n'a pas
-     créées lui-même (la liste est gardée dans sell_state.json).
-2. Achat : cartes que l'on n'a pas encore (« New for you »), à prix fixe. On vise la
-   valeur au classement (commune 1 pt, rare 3, épique 8) : on achète d'abord les
-   meilleures « points par essecoin », et seulement si le prix reste sous le seuil
-   de la rareté (epic <= 60, rare < 25, common < 15) et si le ratio est >= MIN_RATIO.
+   concernées ; LEGENDARY et CREATOR ne sont jamais recyclées ni vendues. Une carte qui
+   a déjà un exemplaire en vente ou en échange n'est pas recyclée.
+   - COMMON : recyclées (5 essecoins).
+   - RARE et EPIC : mises en vente à prix fixe (bien plus que les 15 / 40 du recyclage) ;
+     si la carte n'est pas vendue après SELL_TIMEOUT_MIN minutes, l'annonce est retirée
+     puis la carte recyclée. Le script ne touche JAMAIS aux annonces qu'il n'a pas créées
+     lui-même (la liste est gardée dans sell_state.json).
+2. Achat-revente : une annonce d'une carte que l'on possède déjà, vendue bien en dessous
+   de sa valeur de recyclage, est achetée puis recyclée aussitôt (gain sans risque).
+3. Achat : cartes que l'on n'a pas encore (« New for you »), à prix fixe. On vise la
+   valeur au classement (commune 1 pt, rare 3, épique 8, légendaire 20) : on achète
+   d'abord les meilleurs « points par essecoin », sous les seuils de la rareté
+   (common < 15, rare < 25, epic <= 60, legendary <= 150) et si le ratio est >= MIN_RATIO.
+   Si le solde dépasse IDLE_BALANCE, le ratio minimum est assoupli (RELAXED_RATIO) pour
+   ne pas laisser des essecoins dormir, en gardant toujours RESERVE essecoins.
+   Si une carte intéressante n'est pas encore abordable, on met de côté plutôt que de
+   dépenser pour des cartes moins rentables.
 
 Interrupteurs (variables d'environnement) :
   DRY_RUN          "false" pour agir pour de vrai, sinon simulation (rien n'est cliqué).
-  SELL_DRY_RUN     "false" en plus pour mettre réellement les rares en vente ; sinon
-                   la mise en vente est seulement simulée et les rares sont recyclées.
+  SELL_DRY_RUN     "false" en plus pour mettre réellement les doublons en vente ; sinon
+                   la mise en vente est seulement simulée et les doublons sont recyclés.
 """
 import json
 import os
@@ -41,24 +47,40 @@ SELL_DRY_RUN = DRY_RUN or flag("SELL_DRY_RUN")
 RARITIES = {"COMMON", "RARE", "EPIC", "LEGENDARY", "CREATOR"}
 RECYCLABLE = {"COMMON", "RARE", "EPIC"}  # on garde LEGENDARY et CREATOR
 
-# --- achats : valeur au classement (points par carte différente) ---------------
-POINTS = {"common": 1, "rare": 3, "epic": 8}
-MAX_PRICE = {"epic": 61, "rare": 25, "common": 15}  # achat si prix < seuil (epic <= 60, rare <= 24, common <= 14)
-MIN_RATIO = float(os.environ.get("MIN_RATIO", "0.125"))  # points/essecoin minimum (0 = seuils seuls)
+# --- achats : valeur au classement (points par carte différente) ----------------
+POINTS = {"common": 1, "rare": 3, "epic": 8, "legendary": 20}
+# achat si prix < seuil : common <= 14, rare <= 24, epic <= 60, legendary <= 150
+MAX_PRICE = {"common": 15, "rare": 25, "epic": 61, "legendary": 151}
+MIN_RATIO = float(os.environ.get("MIN_RATIO", "0.125"))  # points/essecoin minimum
+RELAXED_RATIO = float(os.environ.get("RELAXED_RATIO", "0.06"))  # si les essecoins dorment
+IDLE_BALANCE = int(os.environ.get("IDLE_BALANCE", "100"))  # solde à partir duquel on assouplit
+RESERVE = int(os.environ.get("RESERVE", "60"))  # essecoins gardés lors de l'assouplissement
 
 
-def worth(rarity, price):
+def worth(rarity, price, min_ratio=None):
     """Prix acceptable pour cette rareté (sous le seuil ET assez de points par essecoin)."""
     r = rarity.lower()
-    return r in POINTS and 0 < price < MAX_PRICE[r] and POINTS[r] / price >= MIN_RATIO
+    ratio = MIN_RATIO if min_ratio is None else min_ratio
+    return r in POINTS and 0 < price < MAX_PRICE[r] and POINTS[r] / price >= ratio
 
 
-# prix maximum accepté par rareté (déduit de worth)
-PRICE_LIMIT = {r: max((p for p in range(1, MAX_PRICE[r]) if worth(r, p)), default=0) for r in POINTS}
+def price_limits(ratio):
+    return {r: max((p for p in range(1, MAX_PRICE[r]) if worth(r, p, ratio)), default=0) for r in POINTS}
+
+
+PRICE_LIMIT = price_limits(MIN_RATIO)
+RELAXED_LIMIT = price_limits(min(MIN_RATIO, RELAXED_RATIO))
+
+# --- achat-revente : annonces sous la valeur de recyclage -------------------------
+RECYCLE_VALUE = {"common": 5, "rare": 15, "epic": 40}
+FLIP_MIN_PROFIT = {"common": 2, "rare": 3, "epic": 5}
+FLIP_LIMIT = {r: RECYCLE_VALUE[r] - FLIP_MIN_PROFIT[r] for r in RECYCLE_VALUE}
+MAX_FLIPS = 20  # garde-fou par exécution
 
 # --- ventes de doublons ----------------------------------------------------------
-SELL_RARITIES = {"RARE"}
-SELL_MIN, SELL_MAX, SELL_DEFAULT = 20, 30, 26  # prix de vente d'une rare (essecoins)
+SELL_RARITIES = {"RARE", "EPIC"}
+# (prix minimum, prix maximum, prix par défaut) en essecoins ; le recyclage rapporte 15 / 40
+SELL_BOUNDS = {"RARE": (20, 30, 26), "EPIC": (50, 75, 60)}
 SELL_TIMEOUT_MIN = int(os.environ.get("SELL_TIMEOUT_MIN", "120"))
 STATE_FILE = os.environ.get("SELL_STATE_FILE", "sell_state.json")
 
@@ -131,6 +153,8 @@ def parse_listing(text):
         "rarity": rarity,
         "name": tile_name(lines, rarity),
         "is_new": any(l.lower() == "new for you" for l in lines),
+        "owned": next((int(m.group(1)) for l in lines
+                       if (m := re.fullmatch(r"you have ×(\d+)", l, re.I))), 0),
         "price": listing_price(lines),
     }
 
@@ -321,10 +345,11 @@ def scan_sell(page):
 
 
 def sell_price(it):
+    lo, hi, default = SELL_BOUNDS[it["rarity"]]
     ref = it["cheapest"] or it["last_sold"]
     if not ref:
-        return SELL_DEFAULT
-    return max(SELL_MIN, min(SELL_MAX, ref - 1))  # un cran sous l'annonce la moins chère
+        return default
+    return max(lo, min(hi, ref - 1))  # un cran sous l'annonce la moins chère
 
 
 def list_for_sale(page, it, price):
@@ -335,7 +360,9 @@ def list_for_sale(page, it, price):
     settle(page)
 
 
-def recycle_all(page, snapshot, no_sell):
+def recycle_all(page, snapshot, no_sell, only=None):
+    """Vend (RARE / EPIC) ou recycle les doublons. `only` limite l'opération à ces noms
+    (utilisé pour recycler aussitôt les cartes achetées en achat-revente)."""
     goto(page, "/market/sell")
     start = balance(page)
     handled = set()
@@ -346,7 +373,8 @@ def recycle_all(page, snapshot, no_sell):
         if state["halt"]:
             break
         items = [it for it in scan_sell(page)
-                 if it["name"] and it["name"] not in handled and not it["on_market"]]
+                 if it["name"] and it["name"] not in handled and not it["on_market"]
+                 and (only is None or it["name"] in only)]
         if not items:
             break
         if DRY_RUN:  # simulation complète : on liste tout, sans cliquer
@@ -386,7 +414,7 @@ def recycle_all(page, snapshot, no_sell):
         log(f"Recyclage envoyé {it['rarity']} « {it['name']} » (≈ +{it['gain']} essecoins)")
         guard(page)
         goto(page, "/market/sell")
-    return (start or 0) + gain_total, start, recycled, listed
+    return {"start": start, "gain": gain_total, "recycled": recycled, "listed": listed}
 
 
 def verify_listings(page, names):
@@ -439,11 +467,8 @@ def market_path(rarity):
     return f"/market?rarity={rarity}&kind=fixed&sort=price"
 
 
-def gather(page, rarity, bought):
-    """Annonces « New for you » de cette rareté qui valent le coup (triées par prix)."""
-    limit = PRICE_LIMIT[rarity]
-    if limit <= 0:
-        return []
+def fetch_listings(page, rarity, limit):
+    """Annonces à prix fixe de cette rareté, des moins chères jusqu'au prix `limit`."""
     goto(page, market_path(rarity))
     more_clicks = 0
     while True:
@@ -456,22 +481,34 @@ def gather(page, rarity, bought):
         press(more.first)
         more_clicks += 1
         settle(page)
-    seen, out = set(), []
-    for l in listings:
-        if l["is_new"] and l["rarity"].lower() == rarity and l["price"] <= limit \
-                and l["name"] not in bought and l["name"] not in seen:
-            seen.add(l["name"])
-            out.append({"rarity": rarity, "name": l["name"], "price": l["price"]})
+    return [l for l in listings if l["rarity"].lower() == rarity and l["price"] <= limit]
+
+
+def market_scan(page):
+    """Une lecture du marché par rareté (sert à l'achat-revente et aux achats)."""
+    out = {}
+    for rarity in POINTS:
+        limit = max(RELAXED_LIMIT[rarity], FLIP_LIMIT.get(rarity, 0))
+        out[rarity] = fetch_listings(page, rarity, limit) if limit > 0 else []
     return out
 
 
-def locate_listing(page, rarity, name):
-    """Recharge la liste et retrouve l'annonce « New for you » de cette carte."""
-    limit = PRICE_LIMIT[rarity]
+def cheapest_by_name(listings):
+    best = {}
+    for l in listings:
+        if l["name"] and (l["name"] not in best or l["price"] < best[l["name"]]["price"]):
+            best[l["name"]] = l
+    return list(best.values())
+
+
+def locate_listing(page, rarity, name, limit, owned=False):
+    """Recharge la liste et retrouve l'annonce de cette carte (nouvelle pour nous, ou
+    déjà possédée pour l'achat-revente), au prix `limit` au plus."""
     goto(page, market_path(rarity))
     for _ in range(MAX_MORE_CLICKS + 1):
         cur = [x for x in collect_listings(page)
-               if x["name"] == name and x["is_new"] and x["price"] <= limit]
+               if x["name"] == name and x["price"] <= limit
+               and ((x["owned"] >= 1 and not x["is_new"]) if owned else x["is_new"])]
         if cur:
             return cur[0]
         more = page.get_by_role("button", name="Show more listings")
@@ -482,41 +519,99 @@ def locate_listing(page, rarity, name):
     return None
 
 
-def buy_all(page, budget, snapshot):
-    bought = set()
-    if budget <= 0:
-        return budget, 0
+def do_buy(page, rarity, name, price, snapshot, owned=False):
+    """Achète l'annonce (au prix vu ou moins). Renvoie le prix, ou None si disparue."""
+    found = locate_listing(page, rarity, name, price, owned)
+    if found is None:
+        return None
+    press(page.locator(BUY_FORMS).nth(found["idx"]).get_by_role("button", name="Buy", exact=True))
+    settle(page)
+    add_pending("Card bought", name, snapshot)
+    guard(page)
+    return found["price"]
+
+
+def flip_all(page, scan, budget, snapshot):
+    """Achat-revente : cartes déjà possédées, annoncées bien sous leur valeur de recyclage."""
+    cands = []
+    for rarity in RECYCLE_VALUE:
+        cands += [dict(l, profit=RECYCLE_VALUE[rarity] - l["price"])
+                  for l in cheapest_by_name(scan.get(rarity, []))
+                  if not l["is_new"] and l["owned"] >= 1 and l["price"] <= FLIP_LIMIT[rarity]]
+    cands.sort(key=lambda c: (-c["profit"], c["price"]))
+    flipped = set()
+    for c in cands:
+        if state["halt"] or len(flipped) >= MAX_FLIPS:
+            break
+        if c["price"] > budget:
+            continue
+        txt = (f"{c['rarity']} « {c['name']} » à {c['price']} essecoins "
+               f"(recyclage +{RECYCLE_VALUE[c['rarity'].lower()]}, gain ≈ +{c['profit']})")
+        if DRY_RUN:
+            log(f"[SIMULATION] Achat-revente {txt}")
+            budget -= c["price"]
+            flipped.add(c["name"])
+            continue
+        paid = do_buy(page, c["rarity"].lower(), c["name"], c["price"], snapshot, owned=True)
+        if paid is None:
+            continue  # déjà vendue
+        budget -= paid
+        flipped.add(c["name"])
+        log(f"Achat-revente envoyé {txt}")
+    return budget, flipped
+
+
+def buy_all(page, scan, budget, snapshot, skip=()):
+    bought = set(skip)
+    purchases = 0
     cands = []
     for rarity in POINTS:
-        cands += gather(page, rarity, bought)
-    # meilleurs « points par essecoin » d'abord (puis plus de points, puis moins cher)
-    cands.sort(key=lambda c: (-POINTS[c["rarity"]] / c["price"], -POINTS[c["rarity"]], c["price"]))
-    purchases = 0
-    for c in cands:
-        if state["halt"]:
-            break
-        if c["price"] > budget or c["name"] in bought:
-            continue
-        pts = POINTS[c["rarity"]]
-        if DRY_RUN:
-            log(f"[SIMULATION] Acheter {c['rarity'].upper()} « {c['name']} » à {c['price']} essecoins "
-                f"({pts} pt, {pts / c['price']:.2f} pt/essecoin)")
-            budget -= c["price"]
-            bought.add(c["name"])
-            purchases += 1
-            continue
-        found = locate_listing(page, c["rarity"], c["name"])
+        cands += cheapest_by_name([l for l in scan.get(rarity, []) if l["is_new"]])
+
+    def key(c):
+        pts = POINTS[c["rarity"].lower()]
+        return (-pts / c["price"], -pts, c["price"])
+
+    def buy(c):
+        nonlocal budget, purchases
+        rarity, pts = c["rarity"].lower(), POINTS[c["rarity"].lower()]
         bought.add(c["name"])
-        if found is None:
-            continue  # plus disponible (vendue ou déjà possédée)
-        press(page.locator(BUY_FORMS).nth(found["idx"]).get_by_role("button", name="Buy", exact=True))
-        settle(page)
-        add_pending("Card bought", c["name"], snapshot)
-        budget -= found["price"]
+        if DRY_RUN:
+            paid = c["price"]
+            log(f"[SIMULATION] Acheter {c['rarity']} « {c['name']} » à {paid} essecoins "
+                f"({pts} pt, {pts / paid:.2f} pt/essecoin)")
+        else:
+            paid = do_buy(page, rarity, c["name"], c["price"], snapshot)
+            if paid is None:
+                return  # plus disponible (vendue ou déjà possédée)
+            log(f"Achat envoyé {c['rarity']} « {c['name']} » à {paid} essecoins "
+                f"({pts} pt, {pts / paid:.2f} pt/essecoin)")
+        budget -= paid
         purchases += 1
-        log(f"Achat envoyé {c['rarity'].upper()} « {c['name']} » à {found['price']} essecoins "
-            f"({pts} pt, {pts / found['price']:.2f} pt/essecoin)")
-        guard(page)
+
+    # passe 1 : ratio normal, meilleurs points par essecoin d'abord
+    held = False
+    p1 = sorted([c for c in cands if worth(c["rarity"], c["price"])], key=key)
+    for c in p1:
+        if state["halt"] or c["name"] in bought:
+            continue
+        if c["price"] > budget:
+            held = True
+            log(f"Mise de côté pour {c['rarity']} « {c['name']} » à {c['price']} essecoins "
+                f"(solde {budget}) : pas d'achat moins rentable en attendant.")
+            break
+        buy(c)
+
+    # passe 2 : essecoins qui dorment -> ratio assoupli, en gardant RESERVE
+    if not held and budget >= IDLE_BALANCE:
+        p2 = sorted([c for c in cands if c["name"] not in bought
+                     and worth(c["rarity"], c["price"], RELAXED_RATIO)], key=key)
+        for c in p2:
+            if state["halt"]:
+                break
+            if budget - c["price"] < RESERVE:
+                continue
+            buy(c)
     return budget, purchases
 
 
@@ -537,8 +632,20 @@ def main():
         snapshot = None if DRY_RUN else history_text(page)
 
         withdrawn = manage_listings(page)
-        budget, start, recycled, listed = recycle_all(page, snapshot, withdrawn)
-        budget, purchases = buy_all(page, budget, snapshot)
+        r1 = recycle_all(page, snapshot, withdrawn)
+        start, recycled, listed = r1["start"], r1["recycled"], r1["listed"]
+        budget = (start or 0) + r1["gain"]
+
+        purchases = flips = 0
+        if budget > 0:
+            scan = market_scan(page)
+            budget, flipped = flip_all(page, scan, budget, snapshot)
+            flips = len(flipped)
+            if flipped and not DRY_RUN:  # on recycle aussitôt les exemplaires achetés
+                r2 = recycle_all(page, snapshot, withdrawn | flipped, only=flipped)
+                budget += r2["gain"]
+                recycled += r2["recycled"]
+            budget, purchases = buy_all(page, scan, budget, snapshot, skip=flipped)
 
         if listed:
             verify_listings(page, [e["name"] for e in load_state()["listings"]])
@@ -558,7 +665,7 @@ def main():
         goto(page, "/market")
         final = balance(page)
         log(f"Solde : {start} -> {final} essecoins ({recycled} recyclage(s), {listed} mise(s) en vente, "
-            f"{purchases} achat(s))")
+            f"{flips} achat(s)-revente, {purchases} achat(s))")
         browser.close()
     write_summary("Marché")
 
