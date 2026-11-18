@@ -10,7 +10,8 @@
      puis la carte recyclée. Le script ne touche JAMAIS aux annonces qu'il n'a pas créées
      lui-même (la liste est gardée dans sell_state.json).
 2. Achat-revente : une annonce d'une carte que l'on possède déjà, vendue bien en dessous
-   de sa valeur de recyclage, est achetée puis recyclée aussitôt (gain sans risque).
+   de sa valeur de recyclage, est achetée ; l'exemplaire en double suit ensuite le circuit
+   normal (recyclage, ou mise en vente pour les rares et épiques) au passage suivant.
 3. Achat : cartes que l'on n'a pas encore (« New for you »), à prix fixe. On vise la
    valeur au classement (commune 1 pt, rare 3, épique 8, légendaire 20) : on achète
    d'abord les meilleurs « points par essecoin », sous les seuils de la rareté
@@ -360,9 +361,8 @@ def list_for_sale(page, it, price):
     settle(page)
 
 
-def recycle_all(page, snapshot, no_sell, only=None):
-    """Vend (RARE / EPIC) ou recycle les doublons. `only` limite l'opération à ces noms
-    (utilisé pour recycler aussitôt les cartes achetées en achat-revente)."""
+def recycle_all(page, snapshot, no_sell):
+    """Vend (RARE / EPIC) ou recycle les doublons."""
     goto(page, "/market/sell")
     start = balance(page)
     handled = set()
@@ -373,8 +373,7 @@ def recycle_all(page, snapshot, no_sell, only=None):
         if state["halt"]:
             break
         items = [it for it in scan_sell(page)
-                 if it["name"] and it["name"] not in handled and not it["on_market"]
-                 and (only is None or it["name"] in only)]
+                 if it["name"] and it["name"] not in handled and not it["on_market"]]
         if not items:
             break
         if DRY_RUN:  # simulation complète : on liste tout, sans cliquer
@@ -634,17 +633,20 @@ def main():
         withdrawn = manage_listings(page)
         r1 = recycle_all(page, snapshot, withdrawn)
         start, recycled, listed = r1["start"], r1["recycled"], r1["listed"]
-        budget = (start or 0) + r1["gain"]
+        # Budget = solde déjà crédité. Les recyclages de ce passage ne sont pas comptés :
+        # le site les crédite avec du retard et un achat serait refusé faute de solde
+        # (ils serviront au passage suivant, 5 minutes plus tard).
+        budget = start or 0
+        if DRY_RUN:
+            budget += r1["gain"]  # simulation : on montre ce que ferait le passage complet
 
         purchases = flips = 0
         if budget > 0:
             scan = market_scan(page)
+            # Les cartes de l'achat-revente suivent ensuite le circuit normal des doublons
+            # (le site n'affiche pas tout de suite la carte achetée) : recyclage ou mise en vente.
             budget, flipped = flip_all(page, scan, budget, snapshot)
             flips = len(flipped)
-            if flipped and not DRY_RUN:  # on recycle aussitôt les exemplaires achetés
-                r2 = recycle_all(page, snapshot, withdrawn | flipped, only=flipped)
-                budget += r2["gain"]
-                recycled += r2["recycled"]
             budget, purchases = buy_all(page, scan, budget, snapshot, skip=flipped)
 
         if listed:

@@ -20,11 +20,30 @@ runs:
         path: ~/.cache/ms-playwright
         key: pw-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
 
+    # Les paquets système (apt) de Chromium viennent parfois d'un miroir très lent
+    # (4 min 30 observées) : on garde les .deb téléchargés d'un run à l'autre.
+    - name: Runner image version
+      id: img
+      shell: bash
+      run: echo "version=${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+
+    - name: Cache apt packages
+      uses: actions/cache@v4
+      with:
+        path: ~/apt-debs
+        key: apt-${{ runner.os }}-${{ steps.img.outputs.version }}-${{ hashFiles('requirements.txt') }}
+
     - name: Install Chromium
       shell: bash
       run: |
+        mkdir -p ~/apt-debs
+        sudo cp -n ~/apt-debs/*.deb /var/cache/apt/archives/ 2>/dev/null || true
+        echo "apt : $(ls ~/apt-debs | wc -l) paquet(s) en cache"
         if [ "${{ steps.pw-cache.outputs.cache-hit }}" = "true" ]; then
           playwright install-deps chromium
         else
           playwright install --with-deps chromium
         fi
+        sudo cp -n /var/cache/apt/archives/*.deb ~/apt-debs/ 2>/dev/null || true
+        sudo chown -R "$USER" ~/apt-debs 2>/dev/null || true
+        echo "apt : $(ls ~/apt-debs | wc -l) paquet(s) conservés"

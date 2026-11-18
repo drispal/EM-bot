@@ -52,7 +52,7 @@ se terminent dans les 6 minutes).
   vente ou en échange n'est jamais recyclée.
 - **Achat-revente** : une annonce d'une carte que l'on a déjà, à un prix inférieur à sa
   valeur de recyclage (au moins 2 essecoins de gain pour une commune, 3 pour une rare,
-  5 pour une épique), est achetée puis recyclée aussitôt (20 par exécution au maximum).
+  5 pour une épique), est achetée (20 par exécution au maximum) ; le doublon est ensuite recyclé ou mis en vente au passage suivant, comme les autres.
 - **Achats** : cartes manquantes (« New for you ») classées par points au classement
   par essecoin (commune 1, rare 3, épique 8, légendaire 20), sous les seuils common < 15,
   rare < 25, epic ≤ 60, legendary ≤ 150 et avec au moins `MIN_RATIO` = 0,125 point par
@@ -63,6 +63,12 @@ se terminent dans les 6 minutes).
 - **Enchères** : dans la dernière minute, mise minimale autorisée par le site (≈ +5 %)
   sur les cartes manquantes qui passent la même règle de prix ; remise si dépassé (4
   mises max par enchère).
+
+- **Suivi du classement** : à chaque passage des enchères, le script `leaderboard.py` lit
+  `/leaderboard` et, au plus toutes les 30 min, ajoute les 3 premiers (rang, points, cartes) et
+  toi si tu n'es pas dans le top 3 au fichier `leaderboard.csv` de la branche `tracking`
+  (`git fetch origin tracking && git show origin/tracking:leaderboard.csv`). Le résumé de
+  l'évolution s'obtient avec `TRACK_CSV=leaderboard.csv python leaderboard.py --report`.
 
 Variables du dépôt (Settings > Secrets and variables > Actions > Variables) :
 
