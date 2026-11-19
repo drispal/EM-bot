@@ -116,7 +116,11 @@ def watch(page, budget, pages=5):
     """Liste (sans miser) les enchères en cours pour des épiques / légendaires qui manquent,
     même si elles finissent dans plusieurs heures : le bot les prendra en chasse dans les
     6 dernières minutes si leur prix reste acceptable."""
-    for a in read_auctions(page, pages):
+    rows = read_auctions(page, pages)
+    n_new = sum(1 for a in rows if a["is_new"])
+    print(f"Enchères lues : {len(rows)} (dont {n_new} pour des cartes qui me manquent), "
+          f"fin la plus lointaine : {rows[-1]['left_text'] if rows else '-'}")
+    for a in rows:
         if a["is_new"] and a["rarity"].lower() in ("epic", "legendary") and a["secs"] is not None:
             ok = "oui" if M.acceptable(a["rarity"], a["min"], budget) else \
                  ("solde insuffisant" if a["min"] > budget else "non (trop cher)")
