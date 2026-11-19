@@ -135,7 +135,7 @@ tant que les variables du dépôt ne sont pas posées.
 ## Échanges avec les amis (hors Joss)
 
 `friends.py` propose à certains amis des échanges **à valeur égale** (commune 1 pt, rare 3, épique 8 ;
-je peux surpayer d'au plus `FRIEND_TOLERANCE` = 1 point) : mes doublons (jamais légendaire ni Créateur),
+je peux surpayer d'au plus `FRIEND_TOLERANCE` = 1 point) : mes doublons (jamais Créateur ; légendaire seulement pour Mateo et Baptiste, `FRIEND_LEGENDARY_NAMES`),
 que l'ami n'a pas, contre des cartes qu'il a et qui me manquent, jusqu'à 5 cartes de chaque côté. Les cartes
 que le surplus achète déjà au marché ne sont pas demandées. Une proposition à la fois par ami ; sans réponse
 après 120 min (`FRIEND_TRADE_EXPIRY_MIN`) elle est annulée, les cartes retournent au circuit normal (vente /
@@ -144,5 +144,10 @@ Les doublons utiles aux amis ne sont ni vendus ni recyclés, dans la limite de l
 
 | Variable (Settings → Variables) | Rôle |
 |---|---|
-| `FRIEND_TRADE_NAMES` | amis concernés, séparés par `\|` (défaut : `Mateo BOURREL\|Baptiste Brocard`) |
+| `FRIEND_TRADE_NAMES` | amis concernés, séparés par `\|` (défaut : les 9 amis, Joss exclu) |
+| `FRIEND_LEGENDARY_NAMES` | amis qui peuvent recevoir un doublon légendaire (défaut : `Mateo BOURREL\|Baptiste Brocard`) |
 | `FRIEND_TRADE_DRY_RUN` | `false` pour envoyer vraiment les propositions (simulation tant que ce n'est pas `false`) |
+
+Annulation (vérifiée sur le site) : une proposition en attente apparaît dans « Trades you proposed »
+(« Waiting for <ami> ») avec un bouton **Cancel** ; une fois annulée, elle passe dans « Past trades » avec le statut
+**Cancelled** (décalage de 1 à 2 minutes).
