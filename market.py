@@ -23,7 +23,7 @@
    Si une carte intéressante n'est pas encore abordable, on met de côté plutôt que de
    dépenser pour des cartes moins rentables.
    Surplus : le solde au-dessus de SURPLUS_RESERVE (200) achète les communes et rares qui manquent
-   jusqu'à SURPLUS_COINS_PER_PT (60) essecoins par point, meilleurs ratios d'abord.
+   jusqu'à SURPLUS_COINS_PER_PT (100) essecoins par point (épiques : 80), meilleurs ratios d'abord.
 
 Interrupteurs (variables d'environnement) :
   DRY_RUN          "false" pour agir pour de vrai, sinon simulation (rien n'est cliqué).
@@ -77,12 +77,14 @@ IDLE_TIERS = [(FLOOR_BALANCE, FLOOR_RATIO),
               (int(os.environ.get("TIER2_BALANCE", "350")), float(os.environ.get("TIER2_RATIO", "0.035"))),
               (int(os.environ.get("TIER3_BALANCE", "500")), float(os.environ.get("TIER3_RATIO", "0.025")))]
 # Surplus : au-dessus d'une réserve, les essecoins qui dorment servent à acheter les communes et
-# rares qui manquent, jusqu'à SURPLUS_COINS_PER_PT essecoins par point (commune <= 60, rare <= 180),
+# rares qui manquent, jusqu'à SURPLUS_COINS_PER_PT essecoins par point (commune <= 100, rare <= 300),
+# et les épiques jusqu'à SURPLUS_EPIC_COINS_PER_PT (80, soit 640),
 # du meilleur « points par essecoin » au moins bon. La réserve n'est jamais entamée par ces achats :
 # elle garde de quoi acheter une épique ou une légendaire si elle apparaît (paliers ci-dessus).
-SURPLUS_COINS_PER_PT = int(os.environ.get("SURPLUS_COINS_PER_PT", "60"))
+SURPLUS_COINS_PER_PT = int(os.environ.get("SURPLUS_COINS_PER_PT", "100"))
+SURPLUS_EPIC_COINS_PER_PT = int(os.environ.get("SURPLUS_EPIC_COINS_PER_PT", "80"))  # épique : jusqu'à 640 essecoins
 SURPLUS_RESERVE = int(os.environ.get("SURPLUS_RESERVE", "200"))
-SURPLUS_RARITIES = ("common", "rare")
+SURPLUS_RARITIES = ("common", "rare", "epic")
 MAX_SURPLUS_BUYS = int(os.environ.get("MAX_SURPLUS_BUYS", "24"))  # garde-fou par exécution (chaque achat prend quelques secondes)
 HOLD_AHEAD = 40  # on attend une meilleure carte si elle est à moins de 40 essecoins (~12 min de revenus)
 # si les essecoins dorment, ces raretés n'ont plus de plafond de prix (seul le ratio compte)
@@ -128,7 +130,7 @@ def surplus_limit(rarity, budget):
     """Prix maximum des achats « surplus » pour cette rareté (0 si le solde ne dépasse pas la réserve)."""
     if rarity not in SURPLUS_RARITIES or budget <= SURPLUS_RESERVE:
         return 0
-    return POINTS[rarity] * SURPLUS_COINS_PER_PT
+    return POINTS[rarity] * (SURPLUS_EPIC_COINS_PER_PT if rarity == "epic" else SURPLUS_COINS_PER_PT)
 
 
 def tier_limit(rarity, budget):
@@ -852,7 +854,7 @@ def buy_all(page, scan, budget, snapshot, skip=()):
         for tier_balance, tier_ratio in IDLE_TIERS:
             if budget >= tier_balance:
                 relaxed_pass(tier_ratio, f"palier {tier_balance}+ : ratio {tier_ratio}")
-        # passe 4 : surplus au-dessus de la réserve -> communes et rares jusqu'à 30 essecoins/point
+        # passe 4 : surplus au-dessus de la réserve -> communes, rares (100/pt) et épiques (80/pt)
         surplus = sorted([c for c in cands if c["name"] not in bought
                           and c["price"] <= surplus_limit(c["rarity"].lower(), budget)], key=key)
         done = 0
