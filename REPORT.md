@@ -1,18 +1,18 @@
 # Suivi du classement
-39 instantané(s), du 18/11 13:51 au 19/11 10:21 UTC (20.5 h).
+40 instantané(s), du 18/11 13:51 au 19/11 10:55 UTC (21.1 h).
 
 ## Tes points par heure
 | Fenêtre | Points/h | Cartes/h | Durée mesurée |
 |---|---|---|---|
-| depuis le début | 52.4 | 12.9 | 20.5 h |
-| 3 dernières h | 23.9 | 7.1 | 2.7 h |
-| dernière h | 5.1 | 5.1 | 0.6 h |
+| depuis le début | 52.3 | 12.8 | 21.1 h |
+| 3 dernières h | 23.6 | 6.8 | 2.7 h |
+| dernière h | 49.2 | 8.8 | 0.6 h |
 
 ## Les autres du podium face à toi
 | Joueur | Rang | Points | Écart avec toi | Ses pts/h (début) | Ses pts/h (3 h) | Écart/h pour toi (début) | Rattrapage |
 |---|---|---|---|---|---|---|---|
-| Tristan Q. | 2 | 2575 | +368 | 38.6 | 36.2 | +13.8 | ne te rattrape pas |
-| Léo V. | 3 | 1983 | +960 | 14.4 | 34.0 | +38.0 | ne te rattrape pas |
+| Tristan Q. | 2 | 2597 | +374 | 38.6 | 33.4 | +13.7 | ne te rattrape pas |
+| Léo V. | 3 | 1995 | +976 | 14.6 | 30.0 | +37.8 | ne te rattrape pas |
 
-Toi : 2943 pts, 801 cartes (rang 1).
+Toi : 2971 pts, 806 cartes (rang 1).
 Rattrapage = durée estimée avant qu'il te dépasse si les rythmes actuels se maintiennent (les gains par heure fluctuent beaucoup d'une heure à l'autre).
