@@ -70,7 +70,7 @@ se terminent dans les 6 minutes).
   `TIER2_*`, `TIER3_*`). Les enchères suivent les mêmes paliers.
   **Surplus** : le solde au-dessus de `SURPLUS_RESERVE` (200, jamais entamé) achète aussi les
   **communes et rares** qui manquent jusqu'à `SURPLUS_COINS_PER_PT` = 60 essecoins par point
-  (commune ≤ 60, rare ≤ 180), meilleurs ratios d'abord, 12 achats au plus par passage.
+  (commune ≤ 60, rare ≤ 180), meilleurs ratios d'abord, 24 achats au plus par passage (`MAX_SURPLUS_BUYS`).
 - **Enchères** : dans la dernière minute, mise minimale autorisée par le site (≈ +5 %)
   sur les cartes manquantes qui passent la même règle de prix (y compris la règle assouplie
   quand le solde le permet, paliers compris) ; remise si dépassé (4 mises max par enchère).

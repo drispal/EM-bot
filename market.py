@@ -83,7 +83,7 @@ IDLE_TIERS = [(FLOOR_BALANCE, FLOOR_RATIO),
 SURPLUS_COINS_PER_PT = int(os.environ.get("SURPLUS_COINS_PER_PT", "60"))
 SURPLUS_RESERVE = int(os.environ.get("SURPLUS_RESERVE", "200"))
 SURPLUS_RARITIES = ("common", "rare")
-MAX_SURPLUS_BUYS = 12  # garde-fou par exécution (chaque achat prend quelques secondes)
+MAX_SURPLUS_BUYS = int(os.environ.get("MAX_SURPLUS_BUYS", "24"))  # garde-fou par exécution (chaque achat prend quelques secondes)
 HOLD_AHEAD = 40  # on attend une meilleure carte si elle est à moins de 40 essecoins (~12 min de revenus)
 # si les essecoins dorment, ces raretés n'ont plus de plafond de prix (seul le ratio compte)
 IDLE_UNCAPPED = {"epic", "legendary"}
