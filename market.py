@@ -22,6 +22,8 @@
    (FLOOR_RATIO). On n'attend une meilleure carte que si elle est à moins de HOLD_AHEAD.
    Si une carte intéressante n'est pas encore abordable, on met de côté plutôt que de
    dépenser pour des cartes moins rentables.
+   Surplus : le solde au-dessus de SURPLUS_RESERVE (500) achète les communes et rares qui manquent
+   jusqu'à SURPLUS_COINS_PER_PT (30) essecoins par point, meilleurs ratios d'abord.
 
 Interrupteurs (variables d'environnement) :
   DRY_RUN          "false" pour agir pour de vrai, sinon simulation (rien n'est cliqué).
@@ -74,6 +76,14 @@ FLOOR_BALANCE = int(os.environ.get("FLOOR_BALANCE", "200"))
 IDLE_TIERS = [(FLOOR_BALANCE, FLOOR_RATIO),
               (int(os.environ.get("TIER2_BALANCE", "350")), float(os.environ.get("TIER2_RATIO", "0.035"))),
               (int(os.environ.get("TIER3_BALANCE", "500")), float(os.environ.get("TIER3_RATIO", "0.025")))]
+# Surplus : au-dessus d'une réserve, les essecoins qui dorment servent à acheter les communes et
+# rares qui manquent, jusqu'à SURPLUS_COINS_PER_PT essecoins par point (commune <= 30, rare <= 90),
+# du meilleur « points par essecoin » au moins bon. La réserve n'est jamais entamée par ces achats :
+# elle garde de quoi acheter une épique ou une légendaire si elle apparaît (paliers ci-dessus).
+SURPLUS_COINS_PER_PT = int(os.environ.get("SURPLUS_COINS_PER_PT", "30"))
+SURPLUS_RESERVE = int(os.environ.get("SURPLUS_RESERVE", "500"))
+SURPLUS_RARITIES = ("common", "rare")
+MAX_SURPLUS_BUYS = 12  # garde-fou par exécution (chaque achat prend quelques secondes)
 HOLD_AHEAD = 40  # on attend une meilleure carte si elle est à moins de 40 essecoins (~12 min de revenus)
 # si les essecoins dorment, ces raretés n'ont plus de plafond de prix (seul le ratio compte)
 IDLE_UNCAPPED = {"epic", "legendary"}
@@ -112,6 +122,13 @@ PRICE_LIMIT = price_limits(None)
 RELAXED_LIMIT = price_limits(RELAXED_RATIO, idle=True)
 FLOOR_LIMIT = price_limits(FLOOR_RATIO, idle=True)
 TIER_LIMITS = [(b, price_limits(r, idle=True)) for b, r in IDLE_TIERS]
+
+
+def surplus_limit(rarity, budget):
+    """Prix maximum des achats « surplus » pour cette rareté (0 si le solde ne dépasse pas la réserve)."""
+    if rarity not in SURPLUS_RARITIES or budget <= SURPLUS_RESERVE:
+        return 0
+    return POINTS[rarity] * SURPLUS_COINS_PER_PT
 
 
 def tier_limit(rarity, budget):
@@ -688,7 +705,7 @@ def market_scan(page, budget=0):
     out = {}
     for rarity in POINTS:
         limit = max(RELAXED_LIMIT[rarity], PRICE_LIMIT[rarity], FLIP_LIMIT.get(rarity, 0))
-        limit = max(limit, tier_limit(rarity, budget))
+        limit = max(limit, tier_limit(rarity, budget), surplus_limit(rarity, budget))
         out[rarity] = fetch_listings(page, rarity, limit) if limit > 0 else []
         got = out[rarity]
         new = [l for l in got if l["is_new"]]
@@ -779,20 +796,20 @@ def buy_all(page, scan, budget, snapshot, skip=()):
         pts = POINTS[c["rarity"].lower()]
         return (-pts / c["price"], -pts, c["price"])
 
-    def buy(c):
+    def buy(c, tag=""):
         nonlocal budget, purchases
         rarity, pts = c["rarity"].lower(), POINTS[c["rarity"].lower()]
         bought.add(c["name"])
         if DRY_RUN:
             paid = c["price"]
             log(f"[SIMULATION] Acheter {c['rarity']} « {c['name']} » à {paid} essecoins "
-                f"({pts} pt, {pts / paid:.2f} pt/essecoin)", "Achats")
+                f"({pts} pt, {pts / paid:.2f} pt/essecoin){tag}", "Achats")
         else:
             paid = do_buy(page, rarity, c["name"], c["price"], snapshot)
             if paid is None:
                 return  # plus disponible (vendue ou déjà possédée)
             log(f"Achat envoyé {c['rarity']} « {c['name']} » à {paid} essecoins "
-                f"({pts} pt, {pts / paid:.2f} pt/essecoin)", "Achats")
+                f"({pts} pt, {pts / paid:.2f} pt/essecoin){tag}", "Achats")
         budget -= paid
         purchases += 1
 
@@ -832,6 +849,17 @@ def buy_all(page, scan, budget, snapshot, skip=()):
         for tier_balance, tier_ratio in IDLE_TIERS:
             if budget >= tier_balance:
                 relaxed_pass(tier_ratio, f"palier {tier_balance}+ : ratio {tier_ratio}")
+        # passe 4 : surplus au-dessus de la réserve -> communes et rares jusqu'à 30 essecoins/point
+        surplus = sorted([c for c in cands if c["name"] not in bought
+                          and c["price"] <= surplus_limit(c["rarity"].lower(), budget)], key=key)
+        done = 0
+        for c in surplus:
+            if state["halt"] or done >= MAX_SURPLUS_BUYS:
+                break
+            if budget - c["price"] < SURPLUS_RESERVE:
+                continue  # la réserve n'est jamais entamée
+            buy(c, f" [surplus : réserve {SURPLUS_RESERVE} gardée]")
+            done += 1
     return budget, purchases
 
 
