@@ -63,12 +63,16 @@ se terminent dans les 6 minutes).
   les essecoins, le ratio minimum descend à `RELAXED_RATIO` (0,08 : épiques jusqu'à ≈100,
   légendaires jusqu'à ≈250, communes jusqu'à 12), sans réserve (`IDLE_BALANCE` = 0,
   `RESERVE` = 0) ; on n'attend une meilleure carte que si elle est à moins de 40 essecoins du
-  solde. Si le solde dépasse `FLOOR_BALANCE` (200) malgré tout, dernier palier à
-  `FLOOR_RATIO` (0,05 : épiques jusqu'à ≈160, légendaires jusqu'à ≈400).
+  solde. Si les essecoins dorment malgré tout, les plafonds montent par paliers, pour les
+  **épiques et légendaires seulement** (communes et rares restent plafonnées) : solde ≥ 200
+  → ratio 0,05 (épiques ≈160, légendaires ≈400) ; ≥ 350 → 0,035 (≈228 / ≈571) ; ≥ 500 → 0,025
+  (≈320 / ≈800). Chaque palier retombe dès que le solde baisse (réglages `FLOOR_*`,
+  `TIER2_*`, `TIER3_*`). Les enchères suivent les mêmes paliers.
 - **Enchères** : dans la dernière minute, mise minimale autorisée par le site (≈ +5 %)
   sur les cartes manquantes qui passent la même règle de prix (y compris la règle assouplie
-  quand le solde le permet, palier à 200 inclus) ; remise si dépassé (4
-  mises max par enchère).
+  quand le solde le permet, paliers compris) ; remise si dépassé (4 mises max par enchère).
+  Le résumé liste aussi, sans miser, les enchères à venir (jusqu'à 2 jours) pour des épiques ou
+  légendaires qui manquent (« Enchères à surveiller »).
 
 - **Suivi du classement** : à chaque passage des enchères, le script `leaderboard.py` lit
   `/leaderboard` et, au plus toutes les 30 min, ajoute les 3 premiers (rang, points, cartes) et
