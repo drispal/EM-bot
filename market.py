@@ -23,7 +23,7 @@
    Si une carte intéressante n'est pas encore abordable, on met de côté plutôt que de
    dépenser pour des cartes moins rentables.
    Surplus : le solde au-dessus de SURPLUS_RESERVE (500) achète les communes et rares qui manquent
-   jusqu'à SURPLUS_COINS_PER_PT (30) essecoins par point, meilleurs ratios d'abord.
+   jusqu'à SURPLUS_COINS_PER_PT (60) essecoins par point, meilleurs ratios d'abord.
 
 Interrupteurs (variables d'environnement) :
   DRY_RUN          "false" pour agir pour de vrai, sinon simulation (rien n'est cliqué).
@@ -77,10 +77,10 @@ IDLE_TIERS = [(FLOOR_BALANCE, FLOOR_RATIO),
               (int(os.environ.get("TIER2_BALANCE", "350")), float(os.environ.get("TIER2_RATIO", "0.035"))),
               (int(os.environ.get("TIER3_BALANCE", "500")), float(os.environ.get("TIER3_RATIO", "0.025")))]
 # Surplus : au-dessus d'une réserve, les essecoins qui dorment servent à acheter les communes et
-# rares qui manquent, jusqu'à SURPLUS_COINS_PER_PT essecoins par point (commune <= 30, rare <= 90),
+# rares qui manquent, jusqu'à SURPLUS_COINS_PER_PT essecoins par point (commune <= 60, rare <= 180),
 # du meilleur « points par essecoin » au moins bon. La réserve n'est jamais entamée par ces achats :
 # elle garde de quoi acheter une épique ou une légendaire si elle apparaît (paliers ci-dessus).
-SURPLUS_COINS_PER_PT = int(os.environ.get("SURPLUS_COINS_PER_PT", "30"))
+SURPLUS_COINS_PER_PT = int(os.environ.get("SURPLUS_COINS_PER_PT", "60"))
 SURPLUS_RESERVE = int(os.environ.get("SURPLUS_RESERVE", "500"))
 SURPLUS_RARITIES = ("common", "rare")
 MAX_SURPLUS_BUYS = 12  # garde-fou par exécution (chaque achat prend quelques secondes)

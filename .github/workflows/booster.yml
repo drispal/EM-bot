@@ -63,6 +63,9 @@ jobs:
           FEEDER_NAME: ${{ vars.FEEDER_NAME || 'Josserand' }}
           # Échanges avec des amis (hors Joss) : simulés tant que FRIEND_TRADE_DRY_RUN != "false"
           FRIEND_TRADE_NAMES: ${{ vars.FRIEND_TRADE_NAMES || 'Baptiste Brocard|Clara Desnoes|Esther de Moras|Gustave Carton|Livie Langrand|Mateo BOURREL|Maxime Prost|Romane Corbel Gallais|Solveig Herriou' }}
+          # Achats avec le surplus : plafond en essecoins par point, et réserve jamais entamée
+          SURPLUS_COINS_PER_PT: ${{ vars.SURPLUS_COINS_PER_PT || '60' }}
+          SURPLUS_RESERVE: ${{ vars.SURPLUS_RESERVE || '500' }}
           FRIEND_TRADE_DRY_RUN: ${{ vars.FRIEND_TRADE_DRY_RUN || 'true' }}
           # Amis à qui l'on peut donner un doublon légendaire (les autres n'en reçoivent jamais)
           # Amis servis en premier, avec un surplus accepté (points) en leur faveur
