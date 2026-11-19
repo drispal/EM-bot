@@ -10,6 +10,8 @@ Règles :
   à valeur égale en points (commune 1, rare 3, épique 8) : je peux surpayer d'au plus
   FRIEND_TOLERANCE point. On vise d'abord les cartes les plus rares, et on laisse de côté celles
   qu'on trouve déjà au marché à un prix que le surplus accepte (elles s'achètent avec des essecoins).
+* Amis prioritaires (FRIEND_PRIORITY_NAMES : Mateo, Baptiste) : traités en premier, donc ils prennent les doublons
+  avant les autres, et je peux leur offrir un échange à leur avantage jusqu'à FRIEND_PRIORITY_OVERPAY points (15).
 * Les doublons légendaires ne sont proposés qu'aux amis de FRIEND_LEGENDARY_NAMES (Mateo, Baptiste).
 * Une seule proposition à la fois par ami, au plus 5 cartes de chaque côté.
 * Sans réponse après FRIEND_TRADE_EXPIRY_MIN minutes (120), la proposition est annulée : les
@@ -39,6 +41,12 @@ GIVE_RARITIES = ("COMMON", "RARE", "EPIC")  # jamais Créateur ; légendaire seu
 LEGENDARY_NAMES = [n.strip().lower() for n in
                    os.environ.get("FRIEND_LEGENDARY_NAMES", "Mateo BOURREL|Baptiste Brocard").split("|") if n.strip()]
 PTS = {"COMMON": 1, "RARE": 3, "EPIC": 8, "LEGENDARY": 20}
+# Amis prioritaires (Mateo, Baptiste) : servis en premier, et je peux leur offrir un échange à leur avantage
+# (surplus accepté, en points) ; les autres amis restent à FRIEND_TOLERANCE.
+PRIORITY_NAMES = [n.strip().lower() for n in
+                  os.environ.get("FRIEND_PRIORITY_NAMES", "Mateo BOURREL|Baptiste Brocard").split("|") if n.strip()]
+PRIORITY_OVERPAY = int(os.environ.get("FRIEND_PRIORITY_OVERPAY", "15"))
+
 CLOSED = ("declined", "refused", "cancel", "expired", "withdrawn")
 
 
@@ -238,7 +246,9 @@ def friend_step(page, data, engaged=()):
 
     # 2. relecture des amis, propositions
     dups = None
-    for name, href in hrefs.items():
+    # amis prioritaires d'abord : ils choisissent les doublons avant les autres
+    order = sorted(hrefs.items(), key=lambda kv: (not any(l in kv[0].lower() for l in PRIORITY_NAMES), kv[0]))
+    for name, href in order:
         st = store[name]
         refreshed = now - st.get("checked_at", 0) >= REFRESH_MIN * 60 or "wanted" not in st
         if refreshed:
@@ -271,7 +281,8 @@ def friend_step(page, data, engaged=()):
         legendary_ok = any(l in name.lower() for l in LEGENDARY_NAMES)
         gives = [(n, PTS[d["rarity"]]) for n, d in dups.items() if n not in has and n not in keep
                  and (d["rarity"] != "LEGENDARY" or legendary_ok)]
-        pair = best_swap(exclusive, gives)
+        is_priority = any(l in name.lower() for l in PRIORITY_NAMES)
+        pair = best_swap(exclusive, gives, PRIORITY_OVERPAY if is_priority else TOLERANCE)
         if not pair:
             if refreshed:
               A(f"Ami {name} : pas d'échange à valeur égale possible avec mes doublons "
