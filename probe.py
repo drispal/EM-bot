@@ -12,7 +12,9 @@ from playwright.sync_api import sync_playwright
 import market as M
 
 LIMIT = int(os.environ.get("PROBE_LIMIT", "100"))
-RARITIES = ("common", "rare")
+# plafond de lecture par rareté (très haut : on veut tout voir)
+LIMITS = {"common": 3000, "rare": 3000, "epic": 6000, "legendary": 20000}
+RARITIES = ("common", "rare", "epic", "legendary")
 
 
 def main():
@@ -26,6 +28,7 @@ def main():
                                       viewport={"width": 1280, "height": 900})
         page = context.new_page()
         for rarity in RARITIES:
+            LIMIT = LIMITS[rarity]
             got = M.fetch_listings(page, rarity, LIMIT)
             new = [l for l in got if l["is_new"]]
             print(f"{rarity} : {len(got)} annonce(s) lues jusqu'à {LIMIT}, {len(new)} carte(s) manquante(s)")
