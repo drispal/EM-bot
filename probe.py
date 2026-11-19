@@ -21,17 +21,17 @@ def main():
     raw = os.environ.get("ESSEC_STORAGE_STATE")
     if not raw:
         sys.exit("Secret ESSEC_STORAGE_STATE manquant.")
-    lines = [f"## Sonde marché : cartes qui me manquent, en vente jusqu'à {LIMIT} essecoins (aucun achat)"]
+    lines = [f"## Sonde marché : cartes qui me manquent, en vente à tout prix (aucun achat)"]
     with sync_playwright() as p:
         browser = p.chromium.launch()
         context = browser.new_context(storage_state=json.loads(raw), locale="en-US",
                                       viewport={"width": 1280, "height": 900})
         page = context.new_page()
         for rarity in RARITIES:
-            LIMIT = LIMITS[rarity]
-            got = M.fetch_listings(page, rarity, LIMIT)
+            lim = LIMITS[rarity]
+            got = M.fetch_listings(page, rarity, lim)
             new = [l for l in got if l["is_new"]]
-            print(f"{rarity} : {len(got)} annonce(s) lues jusqu'à {LIMIT}, {len(new)} carte(s) manquante(s)")
+            print(f"{rarity} : {len(got)} annonce(s) lues jusqu'à {lim}, {len(new)} carte(s) manquante(s)")
             lines.append(f"\n### {rarity} : {len(got)} annonce(s) lues, {len(new)} pour une carte qui me manque")
             if got:
                 prices = sorted(l["price"] for l in got)
