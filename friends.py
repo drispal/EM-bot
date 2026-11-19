@@ -6,10 +6,11 @@ Règles :
 * Seuls les amis de FRIEND_TRADE_NAMES (séparés par « | ») reçoivent des propositions. Joss n'en
   reçoit jamais d'ici (son circuit reste celui de link.py).
 * On propose à un ami des cartes qu'il ne possède pas, prises parmi mes doublons (jamais
-  légendaire ni Créateur), contre des cartes qu'il a et qui me manquent (« New for you »),
+  légendaire sauf exception ci-dessous, ni Créateur), contre des cartes qu'il a et qui me manquent (« New for you »),
   à valeur égale en points (commune 1, rare 3, épique 8) : je peux surpayer d'au plus
   FRIEND_TOLERANCE point. On vise d'abord les cartes les plus rares, et on laisse de côté celles
   qu'on trouve déjà au marché à un prix que le surplus accepte (elles s'achètent avec des essecoins).
+* Les doublons légendaires ne sont proposés qu'aux amis de FRIEND_LEGENDARY_NAMES (Mateo, Baptiste).
 * Une seule proposition à la fois par ami, au plus 5 cartes de chaque côté.
 * Sans réponse après FRIEND_TRADE_EXPIRY_MIN minutes (120), la proposition est annulée : les
   cartes reviennent au circuit normal (vente ou recyclage). L'ami est ensuite laissé tranquille
@@ -33,8 +34,11 @@ COOLDOWN_MIN = int(os.environ.get("FRIEND_COOLDOWN_MIN", "360"))
 REFRESH_MIN = int(os.environ.get("FRIEND_REFRESH_MIN", "20"))   # relecture de la collection d'un ami
 TOLERANCE = int(os.environ.get("FRIEND_TOLERANCE", "1"))        # surpaiement maximal, en points
 MAX_SIDE = 5
-GIVE_RARITIES = ("COMMON", "RARE", "EPIC")  # jamais légendaire ni Créateur
-PTS = {"COMMON": 1, "RARE": 3, "EPIC": 8}
+GIVE_RARITIES = ("COMMON", "RARE", "EPIC")  # jamais Créateur ; légendaire seulement pour LEGENDARY_NAMES
+# amis à qui l'on peut donner un doublon légendaire (les autres n'en reçoivent jamais)
+LEGENDARY_NAMES = [n.strip().lower() for n in
+                   os.environ.get("FRIEND_LEGENDARY_NAMES", "Mateo BOURREL|Baptiste Brocard").split("|") if n.strip()]
+PTS = {"COMMON": 1, "RARE": 3, "EPIC": 8, "LEGENDARY": 20}
 CLOSED = ("declined", "refused", "cancel", "expired", "withdrawn")
 
 
@@ -78,12 +82,12 @@ def read_friend_collection(page, fid):
 
 
 def spare_dups(page, reserved):
-    """Mes doublons échangeables (nom -> {rarity, copies}) : jamais légendaire / Créateur,
+    """Mes doublons échangeables (nom -> {rarity, copies}) : jamais Créateur (les légendaires sont filtrés par ami),
     jamais une carte déjà en vente ou en échange, jamais celles de `reserved`."""
     M.goto(page, "/market/sell")
     out = {}
-    for it in M.scan_sell(page):
-        if it["rarity"] in GIVE_RARITIES and it["name"] and not it["on_market"] \
+    for it in M.scan_sell(page, recyclable=M.RECYCLABLE | {"LEGENDARY"}):
+        if it["rarity"] in GIVE_RARITIES + ("LEGENDARY",) and it["name"] and not it["on_market"] \
                 and it["name"] not in reserved:
             out[it["name"]] = {"rarity": it["rarity"], "copies": it.get("copies", 2)}
     return out
@@ -95,7 +99,9 @@ def best_swap(want, give, tolerance=TOLERANCE):
     Renvoie (get, give) ou None. On maximise les points reçus, puis on minimise le surpaiement
     et le nombre de cartes données."""
     want = sorted(want, key=lambda c: (-c[1], c[0]))[:10]
-    give = sorted(give, key=lambda c: (c[1], c[0]))[:10]
+    give = sorted(give, key=lambda c: (c[1], c[0]))
+    if len(give) > 10:
+        give = give[:6] + give[-4:]  # les moins chers et les plus précieux (légendaires comprises)
 
     def subsets(items):
         for k in range(1, min(MAX_SIDE, len(items)) + 1):
@@ -118,7 +124,10 @@ def best_swap(want, give, tolerance=TOLERANCE):
 
 
 def pending_status(text, friend, gets):
-    """'done' | 'closed' | 'pending' pour la proposition envoyée à `friend` (cartes reçues `gets`)."""
+    """'done' | 'closed' | 'pending' pour la proposition envoyée à `friend` (cartes reçues `gets`).
+    Sur /market/trades : « Trades you proposed » → « Waiting for <ami> » (bouton Cancel) tant que l'ami
+    n'a pas répondu, puis « Past trades » : « <ami> · +reçues / −données » suivi de Done / Declined /
+    Cancelled (avec un décalage d'environ 1 à 2 minutes)."""
     status = link.past_trade_status(text, friend, gets)
     if status is None:
         return "pending"
@@ -131,7 +140,7 @@ def pending_status(text, friend, gets):
 
 
 CANCEL_JS = r"""([friend, names]) => {
-  const re = /cancel|withdraw|retract/i;
+  const re = /^\s*cancel\s*$/i;
   const btns = [...document.querySelectorAll('main button')].filter(b => re.test(b.innerText));
   return btns.map(b => {
     let el = b;
@@ -150,7 +159,7 @@ def cancel_trade(page, friend, gets):
     blocks = page.evaluate(CANCEL_JS, [friend, gets])
     for i, t in enumerate(blocks):
         if friend.lower() in t.lower() and all(n in t for n in gets):
-            btn = page.locator("main button").filter(has_text=re.compile(r"cancel|withdraw|retract", re.I)).nth(i)
+            btn = page.locator("main button").filter(has_text=re.compile(r"^\s*cancel\s*$", re.I)).nth(i)
             M.press(btn)
             M.settle(page)
             return True
@@ -259,7 +268,9 @@ def friend_step(page, data, engaged=()):
         if dups is None:
             dups = spare_dups(page, set(engaged) | keep)
         has = set(st.get("has", []))
-        gives = [(n, PTS[d["rarity"]]) for n, d in dups.items() if n not in has and n not in keep]
+        legendary_ok = any(l in name.lower() for l in LEGENDARY_NAMES)
+        gives = [(n, PTS[d["rarity"]]) for n, d in dups.items() if n not in has and n not in keep
+                 and (d["rarity"] != "LEGENDARY" or legendary_ok)]
         pair = best_swap(exclusive, gives)
         if not pair:
             if refreshed:
@@ -285,7 +296,8 @@ def friend_step(page, data, engaged=()):
         if dups is None:
             dups = spare_dups(page, set(engaged) | keep)
         useful = sorted(((n, d) for n, d in dups.items()
-                         if n not in keep and any(n not in set(v.get("has", [])) for v in friends_view.values())),
+                         if n not in keep and d["rarity"] != "LEGENDARY"  # jamais vendus : pas de réserve à faire
+                         and any(n not in set(v.get("has", [])) for v in friends_view.values())),
                         key=lambda x: PTS[x[1]["rarity"]])
         held, budget = [], reserve_wanted
         for n, d in useful:
