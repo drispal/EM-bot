@@ -13,6 +13,7 @@ Règles :
 * Amis prioritaires (FRIEND_PRIORITY_NAMES : Mateo, Baptiste) : traités en premier, donc ils prennent les doublons
   avant les autres, et je peux leur offrir un échange à leur avantage jusqu'à FRIEND_PRIORITY_OVERPAY points (15).
 * Les doublons légendaires ne sont proposés qu'aux amis de FRIEND_LEGENDARY_NAMES (Mateo, Baptiste).
+* Une carte déjà demandée dans une proposition en attente n'est pas redemandée à un autre ami.
 * Une seule proposition à la fois par ami, au plus 5 cartes de chaque côté.
 * Sans réponse après FRIEND_TRADE_EXPIRY_MIN minutes (120), la proposition est annulée : les
   cartes reviennent au circuit normal (vente ou recyclage). L'ami est ensuite laissé tranquille
@@ -245,6 +246,9 @@ def friend_step(page, data, engaged=()):
             keep.update(tr["give"])
 
     # 2. relecture des amis, propositions
+    # cartes déjà demandées dans une autre proposition en attente : inutile de les redemander à quelqu'un d'autre
+    # (si deux amis acceptent, la seconde carte ne serait qu'un doublon)
+    claimed = {n for v in store.values() if v.get("trade") for n in v["trade"].get("get", [])}
     dups = None
     # amis prioritaires d'abord : ils choisissent les doublons avant les autres
     order = sorted(hrefs.items(), key=lambda kv: (not any(l in kv[0].lower() for l in PRIORITY_NAMES), kv[0]))
@@ -265,7 +269,7 @@ def friend_step(page, data, engaged=()):
                 continue
             st.update({"checked_at": now, "has": sorted(has), "wanted": wanted})
         wanted_pts = [(w["name"], PTS[w["rarity"]]) for w in st.get("wanted", [])]
-        exclusive = [w for w in wanted_pts if w[0] not in buyable]
+        exclusive = [w for w in wanted_pts if w[0] not in buyable and w[0] not in claimed]
         reserve_names.update(dict(exclusive))
         friends_view[name] = st
         if st.get("trade") or now < st.get("next_at", 0):
@@ -294,10 +298,12 @@ def friend_step(page, data, engaged=()):
                f"je reçois {', '.join(n for n, _ in get)} ({gv} pts)")
         if FRIEND_DRY_RUN:
             A(f"[SIMULATION] {txt}")
+            claimed.update(n for n, _ in get)
             keep.update(n for n, _ in give)
             continue
         if send_proposal(page, href, [n for n, _ in get], [n for n, _ in give]):
             st["trade"] = {"t": now, "get": [n for n, _ in get], "give": [n for n, _ in give]}
+            claimed.update(n for n, _ in get)
             keep.update(n for n, _ in give)
             A(f"{txt} : proposition envoyée.")
 
