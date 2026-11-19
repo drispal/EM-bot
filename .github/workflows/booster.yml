@@ -11,9 +11,27 @@ on:
         description: 'Marché : points par essecoin minimum (test), vide = variable MARKET_MIN_RATIO ou 0.125'
         required: false
         default: ""
+      probe:
+        description: '"true" = sonde en lecture seule du marché (aucun autre job ne tourne)'
+        required: false
+        default: ""
 
 jobs:
+  probe:
+    if: ${{ inputs.probe == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Probe market (read-only)
+        env:
+          ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
+          PROBE_LIMIT: "100"
+        run: python probe.py
+
   open:
+    if: ${{ inputs.probe != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -76,6 +94,7 @@ jobs:
           key: sell-state-${{ github.run_id }}-${{ github.run_attempt }}
 
   auctions:
+    if: ${{ inputs.probe != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 14
     permissions:
@@ -130,7 +149,7 @@ jobs:
   # Compte nourrisseur (Joss) : booster, échanges reçus, annonce appât, recyclage des doublons.
   # Ne tourne que si la variable FEEDER_ENABLED vaut "true" et si le secret ESSEC_STORAGE_STATE_JOSS existe.
   feeder:
-    if: ${{ vars.FEEDER_ENABLED == 'true' }}
+    if: ${{ vars.FEEDER_ENABLED == 'true' && inputs.probe != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
