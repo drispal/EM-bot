@@ -1,12 +1,13 @@
-"""Enchères Essec Masters : mise minimale dans la dernière minute.
+"""Enchères Essec Masters : mise minimale dans la dernière minute, SANS plafond de prix.
 
 On surveille les enchères qui se terminent dans les prochaines minutes, pour les
-cartes que l'on n'a pas encore (« New for you »), et dont la mise minimale reste
-acceptable (même règle que les achats : seuil de la rareté + points par essecoin).
+cartes que l'on n'a pas encore (« New for you »), quelle que soit leur rareté et quel que
+soit leur prix : seule limite, le solde disponible (et AUCTION_MAX_PRICE si on en fixe un,
+0 = aucun plafond). Une carte manquante, même commune, est donc prise à 401 si elle est à 400.
 Quand il reste une minute ou moins, on mise le MINIMUM autorisé par le site (le champ
 « Your bid » est pré-rempli : environ +5 % de la meilleure mise). Si quelqu'un nous
-surenchérit, on remise le minimum tant que cela reste acceptable (4 mises max par
-enchère). Une mise est rendue tout de suite si l'on est dépassé.
+surenchérit, on remise le minimum (MAX_BIDS = 8 mises max par enchère). Une mise est
+rendue tout de suite si l'on est dépassé.
 
 Interrupteur : AUCTION_DRY_RUN ("false" pour miser pour de vrai, sinon simulation).
 """
@@ -23,7 +24,8 @@ import market as M
 DRY_RUN = M.flag("AUCTION_DRY_RUN")
 HORIZON_S = 6 * 60       # on suit les enchères qui finissent dans moins de 6 minutes
 BID_WHEN_S = 60          # on mise quand le site affiche 1 min restante (ou moins)
-MAX_BIDS = 4             # mises maximum par enchère
+MAX_BIDS = int(os.environ.get("AUCTION_MAX_BIDS", "8"))    # mises maximum par enchère
+MAX_PRICE = int(os.environ.get("AUCTION_MAX_PRICE", "0"))   # plafond de mise (0 = aucun : seul le solde limite)
 DEADLINE_S = 9 * 60      # durée maximale du script
 FAR_POLL_S, NEAR_POLL_S = 45, 8
 
@@ -65,6 +67,11 @@ AUCTIONS_JS = r"""() => [...document.querySelectorAll("main form")]
     return {lid: f.querySelector("input[name='listingId']").value,
             min: parseInt(a.min || a.value || '0', 10), text: el.innerText};
   })"""
+
+
+def acceptable(rarity, minimum, budget):
+    """Une carte manquante est toujours bonne à prendre : on ne regarde que le solde (et le plafond éventuel)."""
+    return minimum <= budget and (MAX_PRICE <= 0 or minimum <= MAX_PRICE)
 
 
 def time_left(text):
@@ -122,7 +129,7 @@ def watch(page, budget, pages=5):
           f"fin la plus lointaine : {rows[-1]['left_text'] if rows else '-'}")
     for a in rows:
         if a["is_new"] and a["rarity"].lower() in ("epic", "legendary") and a["secs"] is not None:
-            ok = "oui" if M.acceptable(a["rarity"], a["min"], budget) else \
+            ok = "oui" if acceptable(a["rarity"], a["min"], budget) else \
                  ("solde insuffisant" if a["min"] > budget else "non (trop cher)")
             watch_rows.append([f"{a['rarity']} « {a['name']} »", a["min"], a["left_text"].replace("⏱", "").strip(), ok])
     print(f"Enchères à surveiller (épiques / légendaires manquantes) : {len(watch_rows)}")
@@ -166,7 +173,7 @@ def main():
                 if a["lid"] in tracked or a["secs"] is None or a["secs"] > HORIZON_S:
                     continue
                 if a["is_new"] and a["rarity"].lower() in M.POINTS \
-                        and M.acceptable(a["rarity"], a["min"], budget):
+                        and acceptable(a["rarity"], a["min"], budget):
                     tracked[a["lid"]] = {"name": a["name"], "rarity": a["rarity"], "bids": 0,
                                          "last": None, "done": False}
                     log(f"Enchère suivie : {a['rarity']} « {a['name']} », mise minimale {a['min']} "
@@ -191,7 +198,7 @@ def main():
                         continue  # on est déjà en tête
                     budget += t["last"]  # dépassé : la mise nous est rendue
                     t["last"] = None
-                if not M.acceptable(a["rarity"], a["min"], budget):
+                if not acceptable(a["rarity"], a["min"], budget):
                     t["done"] = True
                     log(f"Enchère abandonnée : « {t['name']} », mise minimale {a['min']} "
                         f"(trop cher ou solde insuffisant : {budget}).")
