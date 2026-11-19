@@ -68,6 +68,9 @@ se terminent dans les 6 minutes).
   → ratio 0,05 (épiques ≈160, légendaires ≈400) ; ≥ 350 → 0,035 (≈228 / ≈571) ; ≥ 500 → 0,025
   (≈320 / ≈800). Chaque palier retombe dès que le solde baisse (réglages `FLOOR_*`,
   `TIER2_*`, `TIER3_*`). Les enchères suivent les mêmes paliers.
+  **Surplus** : le solde au-dessus de `SURPLUS_RESERVE` (500, jamais entamé) achète aussi les
+  **communes et rares** qui manquent jusqu'à `SURPLUS_COINS_PER_PT` = 30 essecoins par point
+  (commune ≤ 30, rare ≤ 90), meilleurs ratios d'abord, 12 achats au plus par passage.
 - **Enchères** : dans la dernière minute, mise minimale autorisée par le site (≈ +5 %)
   sur les cartes manquantes qui passent la même règle de prix (y compris la règle assouplie
   quand le solde le permet, paliers compris) ; remise si dépassé (4 mises max par enchère).
