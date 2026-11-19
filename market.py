@@ -22,7 +22,7 @@
    (FLOOR_RATIO). On n'attend une meilleure carte que si elle est à moins de HOLD_AHEAD.
    Si une carte intéressante n'est pas encore abordable, on met de côté plutôt que de
    dépenser pour des cartes moins rentables.
-   Surplus : le solde au-dessus de SURPLUS_RESERVE (500) achète les communes et rares qui manquent
+   Surplus : le solde au-dessus de SURPLUS_RESERVE (200) achète les communes et rares qui manquent
    jusqu'à SURPLUS_COINS_PER_PT (60) essecoins par point, meilleurs ratios d'abord.
 
 Interrupteurs (variables d'environnement) :
@@ -81,7 +81,7 @@ IDLE_TIERS = [(FLOOR_BALANCE, FLOOR_RATIO),
 # du meilleur « points par essecoin » au moins bon. La réserve n'est jamais entamée par ces achats :
 # elle garde de quoi acheter une épique ou une légendaire si elle apparaît (paliers ci-dessus).
 SURPLUS_COINS_PER_PT = int(os.environ.get("SURPLUS_COINS_PER_PT", "60"))
-SURPLUS_RESERVE = int(os.environ.get("SURPLUS_RESERVE", "500"))
+SURPLUS_RESERVE = int(os.environ.get("SURPLUS_RESERVE", "200"))
 SURPLUS_RARITIES = ("common", "rare")
 MAX_SURPLUS_BUYS = 12  # garde-fou par exécution (chaque achat prend quelques secondes)
 HOLD_AHEAD = 40  # on attend une meilleure carte si elle est à moins de 40 essecoins (~12 min de revenus)
