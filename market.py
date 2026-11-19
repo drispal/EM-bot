@@ -66,6 +66,14 @@ RESERVE = int(os.environ.get("RESERVE", "0"))  # essecoins gardés lors de l'ass
 # si les essecoins s'accumulent malgré tout (rien d'achetable), dernier palier : ratio plancher
 FLOOR_RATIO = float(os.environ.get("FLOOR_RATIO", "0.05"))  # épique <= 160, légendaire <= 400
 FLOOR_BALANCE = int(os.environ.get("FLOOR_BALANCE", "200"))
+# Paliers progressifs (épiques et légendaires seulement : les communes et rares restent plafonnées) :
+# plus les essecoins dorment, plus on accepte de payer cher une carte qui manque. Chaque palier
+# s'applique tant que le solde reste au-dessus de son seuil, donc il retombe dès qu'on a dépensé.
+# (solde minimum, points/essecoin minimum) -> épique / légendaire au plus :
+#   200 : 0,05  (160 / 400)   350 : 0,035  (228 / 571)   500 : 0,025  (320 / 800)
+IDLE_TIERS = [(FLOOR_BALANCE, FLOOR_RATIO),
+              (int(os.environ.get("TIER2_BALANCE", "350")), float(os.environ.get("TIER2_RATIO", "0.035"))),
+              (int(os.environ.get("TIER3_BALANCE", "500")), float(os.environ.get("TIER3_RATIO", "0.025")))]
 HOLD_AHEAD = 40  # on attend une meilleure carte si elle est à moins de 40 essecoins (~12 min de revenus)
 # si les essecoins dorment, ces raretés n'ont plus de plafond de prix (seul le ratio compte)
 IDLE_UNCAPPED = {"epic", "legendary"}
@@ -93,7 +101,7 @@ def acceptable(rarity, price, budget):
     if budget >= IDLE_BALANCE and budget - price >= RESERVE \
             and worth(rarity, price, RELAXED_RATIO, idle=True):
         return True
-    return budget >= FLOOR_BALANCE and worth(rarity, price, FLOOR_RATIO, idle=True)
+    return any(budget >= b and worth(rarity, price, r, idle=True) for b, r in IDLE_TIERS)
 
 
 def price_limits(ratio, idle=False):
@@ -103,6 +111,12 @@ def price_limits(ratio, idle=False):
 PRICE_LIMIT = price_limits(None)
 RELAXED_LIMIT = price_limits(RELAXED_RATIO, idle=True)
 FLOOR_LIMIT = price_limits(FLOOR_RATIO, idle=True)
+TIER_LIMITS = [(b, price_limits(r, idle=True)) for b, r in IDLE_TIERS]
+
+
+def tier_limit(rarity, budget):
+    """Prix maximum accepté pour cette rareté avec ce solde, tous paliers confondus."""
+    return max([lim[rarity] for b, lim in TIER_LIMITS if budget >= b], default=0)
 
 # --- achat-revente : annonces sous la valeur de recyclage -------------------------
 RECYCLE_VALUE = {"common": 5, "rare": 15, "epic": 40}
@@ -674,8 +688,7 @@ def market_scan(page, budget=0):
     out = {}
     for rarity in POINTS:
         limit = max(RELAXED_LIMIT[rarity], PRICE_LIMIT[rarity], FLIP_LIMIT.get(rarity, 0))
-        if budget >= FLOOR_BALANCE:
-            limit = max(limit, FLOOR_LIMIT[rarity])
+        limit = max(limit, tier_limit(rarity, budget))
         out[rarity] = fetch_listings(page, rarity, limit) if limit > 0 else []
         got = out[rarity]
         new = [l for l in got if l["is_new"]]
@@ -815,9 +828,10 @@ def buy_all(page, scan, budget, snapshot, skip=()):
 
     if not held and budget >= IDLE_BALANCE:
         relaxed_pass(RELAXED_RATIO, "ratio assoupli")
-        # passe 3 : le solde s'accumule malgré tout -> ratio plancher
-        if budget >= FLOOR_BALANCE:
-            relaxed_pass(FLOOR_RATIO, "ratio plancher")
+        # passe 3 : le solde s'accumule malgré tout -> paliers progressifs (épiques / légendaires)
+        for tier_balance, tier_ratio in IDLE_TIERS:
+            if budget >= tier_balance:
+                relaxed_pass(tier_ratio, f"palier {tier_balance}+ : ratio {tier_ratio}")
     return budget, purchases
 
 

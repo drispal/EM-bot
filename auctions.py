@@ -28,6 +28,7 @@ DEADLINE_S = 9 * 60      # durée maximale du script
 FAR_POLL_S, NEAR_POLL_S = 45, 8
 
 report = []
+watch_rows = []  # cartes manquantes (épiques / légendaires) dont l'enchère se termine plus tard
 
 
 def log(msg):
@@ -44,8 +45,14 @@ def write_summary():
         f.write(f"## Enchères : {mode}\n")
         for line in report or ["Rien à faire."]:
             f.write(f"- {line}\n")
+        if watch_rows:
+            f.write(f"\n### Enchères à surveiller : cartes épiques / légendaires qui me manquent ({len(watch_rows)})\n")
+            f.write("| Carte | Mise minimale | Fin dans | Acceptable avec le solde actuel |\n|---|---|---|---|\n")
+            for r in watch_rows:
+                f.write("| " + " | ".join(str(c) for c in r) + " |\n")
 
 
+AUCTION_FORMS = "main form:has(input[name='amount']):has(input[name='listingId'])"
 AUCTIONS_JS = r"""() => [...document.querySelectorAll("main form")]
   .filter(f => f.querySelector("input[name='amount']") && f.querySelector("input[name='listingId']"))
   .map(f => {
@@ -80,8 +87,20 @@ def time_left(text):
     return total if (mm or ss) else None
 
 
-def read_auctions(page):
+def read_auctions(page, pages=1):
+    """Enchères triées par fin proche ; `pages` > 1 charge aussi les suivantes (24 par page)."""
     M.goto(page, "/market?kind=auction&sort=ending")
+    for _ in range(pages - 1):
+        more = page.get_by_role("button", name="Show more listings")
+        if more.count() == 0:
+            break
+        before = page.locator(AUCTION_FORMS).count()
+        M.press(more.first)
+        try:
+            page.wait_for_function("([sel, n]) => document.querySelectorAll(sel).length > n",
+                                   arg=[AUCTION_FORMS, before], timeout=8000)
+        except Exception:  # noqa: BLE001  (plus rien à charger, ou chargement lent)
+            page.wait_for_timeout(1000)
     out = []
     for it in page.evaluate(AUCTIONS_JS):
         info = M.parse_listing(it["text"])
@@ -91,6 +110,18 @@ def read_auctions(page):
                      "left_text": (re.search(r"⏱[^\n]*", it["text"]) or [""])[0].strip()})
         out.append(info)
     return out
+
+
+def watch(page, budget, pages=5):
+    """Liste (sans miser) les enchères en cours pour des épiques / légendaires qui manquent,
+    même si elles finissent dans plusieurs heures : le bot les prendra en chasse dans les
+    6 dernières minutes si leur prix reste acceptable."""
+    for a in read_auctions(page, pages):
+        if a["is_new"] and a["rarity"].lower() in ("epic", "legendary") and a["secs"] is not None:
+            ok = "oui" if M.acceptable(a["rarity"], a["min"], budget) else \
+                 ("solde insuffisant" if a["min"] > budget else "non (trop cher)")
+            watch_rows.append([f"{a['rarity']} « {a['name']} »", a["min"], a["left_text"].replace("⏱", "").strip(), ok])
+    print(f"Enchères à surveiller (épiques / légendaires manquantes) : {len(watch_rows)}")
 
 
 def place_bid(page, lid, amount):
@@ -120,6 +151,11 @@ def main():
             auctions = read_auctions(page)
             if budget is None:
                 budget = M.balance(page) or 0
+                try:  # une fois par passage : les enchères à venir pour les cartes qui manquent
+                    watch(page, budget)
+                except Exception as exc:  # noqa: BLE001  (information seulement)
+                    print(f"Surveillance des enchères ignorée : {type(exc).__name__}: {str(exc)[:100]}")
+                auctions = read_auctions(page)
 
             # 1) nouvelles enchères intéressantes qui se terminent bientôt
             for a in auctions:
