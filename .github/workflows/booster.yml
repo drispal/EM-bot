@@ -136,6 +136,9 @@ jobs:
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
           # Simulation tant que la variable MARKET_AUCTION_DRY_RUN n'est pas "false"
+          # Enchères sans plafond de prix (0 = aucun) ; mises maximum par enchère
+          AUCTION_MAX_PRICE: ${{ vars.AUCTION_MAX_PRICE || '0' }}
+          AUCTION_MAX_BIDS: ${{ vars.AUCTION_MAX_BIDS || '8' }}
           AUCTION_DRY_RUN: ${{ vars.MARKET_AUCTION_DRY_RUN || 'true' }}
         run: python auctions.py
 

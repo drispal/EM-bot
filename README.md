@@ -72,8 +72,9 @@ se terminent dans les 6 minutes).
   **communes et rares** qui manquent jusqu'à `SURPLUS_COINS_PER_PT` = 60 essecoins par point
   (commune ≤ 60, rare ≤ 180), meilleurs ratios d'abord, 24 achats au plus par passage (`MAX_SURPLUS_BUYS`).
 - **Enchères** : dans la dernière minute, mise minimale autorisée par le site (≈ +5 %)
-  sur les cartes manquantes qui passent la même règle de prix (y compris la règle assouplie
-  quand le solde le permet, paliers compris) ; remise si dépassé (4 mises max par enchère).
+  sur toute carte manquante, **sans plafond de prix** (commune comprise : à 400, on prend à 401) ;
+  seul le solde limite, et `AUCTION_MAX_PRICE` (0 = aucun) permet d'en fixer un. Remise si dépassé
+  (`AUCTION_MAX_BIDS` = 8 mises max par enchère).
   Le résumé liste aussi, sans miser, les enchères à venir (jusqu'à 2 jours) pour des épiques ou
   légendaires qui manquent (« Enchères à surveiller »).
 
