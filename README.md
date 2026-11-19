@@ -145,6 +145,8 @@ Les doublons utiles aux amis ne sont ni vendus ni recyclés, dans la limite de l
 | Variable (Settings → Variables) | Rôle |
 |---|---|
 | `FRIEND_TRADE_NAMES` | amis concernés, séparés par `\|` (défaut : les 9 amis, Joss exclu) |
+| `FRIEND_PRIORITY_NAMES` | amis prioritaires : servis en premier (ils prennent les doublons avant les autres) (défaut : `Mateo BOURREL\|Baptiste Brocard`) |
+| `FRIEND_PRIORITY_OVERPAY` | surplus maximal accepté en leur faveur, en points (défaut : 15 ; les autres amis : `FRIEND_TOLERANCE`, 1) |
 | `FRIEND_LEGENDARY_NAMES` | amis qui peuvent recevoir un doublon légendaire (défaut : `Mateo BOURREL\|Baptiste Brocard`) |
 | `FRIEND_TRADE_DRY_RUN` | `false` pour envoyer vraiment les propositions (simulation tant que ce n'est pas `false`) |
 

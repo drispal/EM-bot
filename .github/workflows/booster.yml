@@ -65,6 +65,9 @@ jobs:
           FRIEND_TRADE_NAMES: ${{ vars.FRIEND_TRADE_NAMES || 'Baptiste Brocard|Clara Desnoes|Esther de Moras|Gustave Carton|Livie Langrand|Mateo BOURREL|Maxime Prost|Romane Corbel Gallais|Solveig Herriou' }}
           FRIEND_TRADE_DRY_RUN: ${{ vars.FRIEND_TRADE_DRY_RUN || 'true' }}
           # Amis à qui l'on peut donner un doublon légendaire (les autres n'en reçoivent jamais)
+          # Amis servis en premier, avec un surplus accepté (points) en leur faveur
+          FRIEND_PRIORITY_NAMES: ${{ vars.FRIEND_PRIORITY_NAMES || 'Mateo BOURREL|Baptiste Brocard' }}
+          FRIEND_PRIORITY_OVERPAY: ${{ vars.FRIEND_PRIORITY_OVERPAY || '15' }}
           FRIEND_LEGENDARY_NAMES: ${{ vars.FRIEND_LEGENDARY_NAMES || 'Mateo BOURREL|Baptiste Brocard' }}
         run: python market.py
 
