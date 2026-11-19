@@ -130,3 +130,19 @@ tant que les variables du dépôt ne sont pas posées.
   il n'achète que l'annonce appât du principal (nom, prix et vendeur vérifiés) ; rien n'est
   proposé si Joss n'a pas publié son solde depuis 30 min ; toute erreur de ce volet est ignorée
   et ne bloque jamais le marché principal.
+
+
+## Échanges avec les amis (hors Joss)
+
+`friends.py` propose à certains amis des échanges **à valeur égale** (commune 1 pt, rare 3, épique 8 ;
+je peux surpayer d'au plus `FRIEND_TOLERANCE` = 1 point) : mes doublons (jamais légendaire ni Créateur),
+que l'ami n'a pas, contre des cartes qu'il a et qui me manquent, jusqu'à 5 cartes de chaque côté. Les cartes
+que le surplus achète déjà au marché ne sont pas demandées. Une proposition à la fois par ami ; sans réponse
+après 120 min (`FRIEND_TRADE_EXPIRY_MIN`) elle est annulée, les cartes retournent au circuit normal (vente /
+recyclage) et l'ami est laissé tranquille 6 h (`FRIEND_COOLDOWN_MIN`). Un échange refusé donne la même pause.
+Les doublons utiles aux amis ne sont ni vendus ni recyclés, dans la limite de la valeur des cartes à obtenir.
+
+| Variable (Settings → Variables) | Rôle |
+|---|---|
+| `FRIEND_TRADE_NAMES` | amis concernés, séparés par `\|` (défaut : `Mateo BOURREL\|Baptiste Brocard`) |
+| `FRIEND_TRADE_DRY_RUN` | `false` pour envoyer vraiment les propositions (simulation tant que ce n'est pas `false`) |

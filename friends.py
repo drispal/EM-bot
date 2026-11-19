@@ -297,4 +297,6 @@ def friend_step(page, data, engaged=()):
         if held:
             A("Doublons gardés pour les échanges avec les amis (ni vendus ni recyclés) : "
               + ", ".join(held))
+    if FRIEND_DRY_RUN:
+        return set()  # simulation : on ne retient aucun doublon, le circuit normal reste inchangé
     return keep
