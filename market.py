@@ -174,6 +174,7 @@ def table_row(sec, header, row):
 SECTIONS = [  # ordre d'affichage dans le résumé
     ("À regarder", "⚠ À regarder"),
     ("Joss", "Compte Joss (échange, appât, réserve)"),
+    ("Amis", "Échanges avec les amis"),
     ("Doublons", "Doublons de ce passage"),
     ("Achats", "Achats"),
     ("Annonces", "Mes annonces en cours"),
@@ -452,11 +453,13 @@ def scan_sell(page, recyclable=RECYCLABLE):
         if rarity not in recyclable:
             continue
         text = t["text"]
+        m_copies = re.search(r"×\s*(\d+)", text)
         m_last = re.search(r"last sold\s+(\d+)", text, re.I)
         m_cheap = re.search(r"cheapest now\s+(\d+)", text, re.I)
         m_gain = re.search(r"\+\s*(\d+)", label)
         out.append({
             "idx": i, "rarity": rarity, "name": tile_name(lines, rarity), "label": label,
+            "copies": int(m_copies.group(1)) if m_copies else 2,
             "gain": int(m_gain.group(1)) if m_gain else 0,
             "on_market": "on the market or in a trade" in text.lower(),
             "last_sold": int(m_last.group(1)) if m_last else None,
@@ -863,6 +866,39 @@ def buy_all(page, scan, budget, snapshot, skip=()):
     return budget, purchases
 
 
+def friend_trades(page, engaged):
+    """Échanges avec les amis (friends.py) : doublons à ne pas vendre ni recycler. Ne bloque jamais le marché."""
+    try:
+        import friends
+        if not friends.FRIEND_NAMES:
+            return set()
+        data = load_state()
+        before = json.dumps(data, sort_keys=True)
+        keep = friends.friend_step(page, data, engaged)
+        if json.dumps(data, sort_keys=True) != before:
+            save_state(data)
+        return keep
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        log(f"Échanges amis : erreur ignorée ({type(exc).__name__}: {str(exc)[:120]}).", "Amis")
+        return set()
+
+
+def remember_market_missing(scan):
+    """Cartes qui me manquent et qu'on trouve déjà au marché à un prix que le surplus accepte :
+    inutile de les demander à un ami (elles s'achètent avec des essecoins)."""
+    try:
+        names = sorted({l["name"] for r in ("common", "rare") for l in scan.get(r, [])
+                        if l["is_new"] and l["name"] and l["price"] <= surplus_limit(r, 10 ** 6)})
+        data = load_state()
+        if data.get("market_missing") != names:
+            data["market_missing"] = names
+            save_state(data)
+    except Exception as exc:  # noqa: BLE001
+        print(f"market_missing non enregistré ({type(exc).__name__}).")
+
+
 def main():
     raw = os.environ.get("ESSEC_STORAGE_STATE")
     if not raw:
@@ -884,6 +920,7 @@ def main():
         if not FEEDER:
             import link  # compte nourrisseur : échange + annonce appât, avant le recyclage des doublons
             keep_spare, keep_names = link.main_link(page)  # réserve pour Joss + cartes déjà engagées
+            keep_names = set(keep_names) | friend_trades(page, keep_names)  # amis : propositions et réserve
         r1 = recycle_all(page, snapshot, withdrawn, keep_spare, keep_names)
         start, recycled, listed = r1["start"], r1["recycled"], r1["listed"]
         # Budget = solde déjà crédité. Les recyclages de ce passage ne sont pas comptés :
@@ -896,6 +933,7 @@ def main():
         purchases = flips = 0
         if budget > 0 and not FEEDER:
             scan = market_scan(page, budget)
+            remember_market_missing(scan)
             # Les cartes de l'achat-revente suivent ensuite le circuit normal des doublons
             # (le site n'affiche pas tout de suite la carte achetée) : recyclage ou mise en vente.
             budget, flipped = flip_all(page, scan, budget, snapshot)
