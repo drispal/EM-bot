@@ -40,10 +40,10 @@ jobs:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
         run: |
           timeout 150 bash scripts/warp_up.sh || echo "WARP KO"
-          for m in headless headed-flags; do
+          for m in headed-flags; do
             echo "########## MODE $m"
             if [ "$m" = "headed-flags" ]; then
-              MODE=$m timeout 150 xvfb-run -a python -u debug_open.py || true
+              CLICK_WIDGET=1 MODE=$m timeout 150 xvfb-run -a python -u debug_open.py || true
             else
               MODE=$m timeout 150 python -u debug_open.py || true
             fi

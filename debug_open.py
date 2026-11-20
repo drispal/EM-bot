@@ -40,7 +40,8 @@ def main():
         page.on("console", lambda m: log(f"CONSOLE {m.type}: {m.text[:300]}") if (m.type in ("error", "warning") and "font-size:0" not in m.text and "GL Driver" not in m.text) or m.text.startswith("TSMSG") else None)
         context.add_init_script("""
           if (window.top === window) {
-          window.addEventListener('message', e => { try { console.log('TSMSG ' + e.origin + ' ' + JSON.stringify(e.data).slice(0,400)); } catch (x) {} });
+          window.__ev = [];
+          window.addEventListener('message', e => { try { if (e.data && e.data.event && e.data.event !== 'food') window.__ev.push(e.data.event); console.log('TSMSG ' + e.origin + ' ' + JSON.stringify(e.data).slice(0,400)); } catch (x) {} });
           (function wait() {
             if (window.turnstile && !window.__tsw) {
               window.__tsw = true;
@@ -90,6 +91,36 @@ def main():
         for t in (1, 2, 4, 8, 15, 30):
             page.wait_for_timeout(int((t - (time.time() - T0 - 0)) * 0) + 0)
             time.sleep(max(0, t - 0) if False else 0)
+        t_wait = time.time()
+        while time.time() - t_wait < 25 and "interactiveBegin" not in page.evaluate("window.__ev"):
+            page.wait_for_timeout(300)
+        log("événements Turnstile : " + str(page.evaluate("window.__ev")))
+        for f in page.frames:
+            if "cloudflare" in f.url:
+                try:
+                    el = f.frame_element()
+                    box = el.bounding_box()
+                    info = el.evaluate("""e => { const out=[]; let n=e; while(n && n.tagName){ const c=getComputedStyle(n); const r=n.getBoundingClientRect(); out.push(n.tagName+'#'+n.id+' disp='+c.display+' vis='+c.visibility+' op='+c.opacity+' pos='+c.position+' '+Math.round(r.width)+'x'+Math.round(r.height)+'@'+Math.round(r.x)+','+Math.round(r.y)); n=n.parentElement; if(out.length>5) break;} return out; }""")
+                    log(f"   FRAME box={box} chaine={info}")
+                except Exception as e:  # noqa: BLE001
+                    log(f"   FRAME erreur {str(e)[:120]}")
+        if os.environ.get("CLICK_WIDGET") == "1":
+            for f in page.frames:
+                if "cloudflare" in f.url:
+                    try:
+                        box = f.frame_element().bounding_box()
+                    except Exception:  # noqa: BLE001
+                        box = None
+                    if box and box["width"] > 20 and box["height"] > 20:
+                        x, y = box["x"] + 28, box["y"] + box["height"] / 2
+                        page.mouse.move(x - 120, y - 40, steps=12)
+                        page.wait_for_timeout(400)
+                        page.mouse.move(x, y, steps=18)
+                        page.wait_for_timeout(300)
+                        page.mouse.click(x, y)
+                        log(f"   clic souris sur le widget en ({x:.0f},{y:.0f})")
+                        page.wait_for_timeout(4000)
+                        log("   événements après clic : " + str(page.evaluate("window.__ev")))
         marks = [1, 3, 6, 12, 20, 35]
         def snap(tag):
             try:
