@@ -1,0 +1,38 @@
+name: Sniper (cartes manquantes au marché)
+
+# Un run reste vivant ~5 h 35 et relit toutes les 10 s les annonces les plus récentes ; il achète
+# toute carte qui me manque. Pas de planification GitHub : un cron externe (cron-job.org) lance
+# ce workflow via l'API (workflow_dispatch). Le groupe de concurrence ne garde qu'un run actif et
+# un seul en attente : les lancements en trop sont simplement remplacés.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '"true" = simulation, "false" = achats réels, vide = variable SNIPER_DRY_RUN'
+        required: false
+        default: ""
+      minutes:
+        description: 'Durée du run en minutes (défaut 335)'
+        required: false
+        default: ""
+
+jobs:
+  sniper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    concurrency:
+      group: sniper-${{ github.ref_name }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+
+      - name: Sniper
+        env:
+          ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
+          # Simulation tant que la variable SNIPER_DRY_RUN n'est pas "false"
+          SNIPER_DRY_RUN: ${{ inputs.dry_run || vars.SNIPER_DRY_RUN || 'true' }}
+          SNIPER_MINUTES: ${{ inputs.minutes || '335' }}
+          SNIPER_COINS_PER_PT: ${{ vars.SNIPER_COINS_PER_PT || '500' }}
+        run: python sniper.py
