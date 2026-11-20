@@ -16,7 +16,29 @@ on:
         required: false
         default: ""
 
+      inspect:
+        description: '"true" = lecture seule de mon compte (album, échanges, activité, pages choisies) ; aucun autre job ne tourne'
+        required: false
+        default: ""
+      paths:
+        description: 'inspect : chemins supplémentaires à lire (séparés par des espaces), ex. "/friends /market/trades"'
+        required: false
+        default: ""
+
 jobs:
+  inspect:
+    if: ${{ inputs.inspect == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Inspect my account (read-only)
+        env:
+          ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
+          INSPECT_PATHS: ${{ inputs.paths }}
+        run: python inspect_account.py
+
   probe:
     if: ${{ inputs.probe == 'true' }}
     runs-on: ubuntu-latest
@@ -31,7 +53,7 @@ jobs:
         run: python probe.py
 
   open:
-    if: ${{ inputs.probe != 'true' }}
+    if: ${{ inputs.probe != 'true' && inputs.inspect != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -94,7 +116,7 @@ jobs:
           key: sell-state-${{ github.run_id }}-${{ github.run_attempt }}
 
   auctions:
-    if: ${{ inputs.probe != 'true' }}
+    if: ${{ inputs.probe != 'true' && inputs.inspect != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 14
     permissions:
@@ -149,7 +171,7 @@ jobs:
   # Compte nourrisseur (Joss) : booster, échanges reçus, annonce appât, recyclage des doublons.
   # Ne tourne que si la variable FEEDER_ENABLED vaut "true" et si le secret ESSEC_STORAGE_STATE_JOSS existe.
   feeder:
-    if: ${{ vars.FEEDER_ENABLED == 'true' && inputs.probe != 'true' }}
+    if: ${{ vars.FEEDER_ENABLED == 'true' && inputs.probe != 'true' && inputs.inspect != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
