@@ -209,3 +209,19 @@ jobs:
         if: always() && github.ref_name == 'main'
         continue-on-error: true
         run: .github/scripts/tracking.sh push "Feeder balance" feeder.json
+
+  # Veilleur du sniper : à chaque passage du cron du booster (toutes les 5 min), on demande le lancement
+  # du sniper. Un seul run du sniper reste actif et un seul est gardé en attente : les demandes en trop
+  # sont remplacées, et quand le run actif se termine (5 h 35) le suivant démarre aussitôt. Aucun
+  # deuxième cron externe n'est nécessaire.
+  sniper-keepalive:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - name: Relancer le sniper
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run sniper.yml --repo "$GITHUB_REPOSITORY" --ref main
