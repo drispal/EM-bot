@@ -38,10 +38,15 @@ jobs:
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
         run: |
-          for h in brunhild.challenges.cloudflare.com hagen.challenges.cloudflare.com challenges.cloudflare.com www.essecmasters.com; do
-            echo "DNS $h -> $(getent hosts $h | head -1 || echo ECHEC) | curl: $(curl -s -o /dev/null -m 8 -w '%{http_code}' https://$h/ || echo ECHEC)"
+          for h in brunhild.challenges.cloudflare.com hagen.challenges.cloudflare.com challenges.cloudflare.com; do
+            echo "== $h"
+            echo "A    : $(getent ahostsv4 $h | awk '{print $1}' | sort -u | tr '\n' ' ')"
+            echo "AAAA : $(getent ahostsv6 $h | awk '{print $1}' | sort -u | tr '\n' ' ')"
+            echo "curl -4: $(curl -4 -s -o /dev/null -m 8 -w '%{http_code}' https://$h/ 2>&1) | curl -6: $(curl -6 -s -o /dev/null -m 8 -w '%{http_code}' https://$h/ 2>&1)"
+            echo "curl -4 -v: $(curl -4 -sv -o /dev/null -m 8 https://$h/ 2>&1 | grep -E 'Connected|timed|refused|SSL|HTTP/' | head -3 | tr '\n' ';')"
           done
-          for m in headless headed-flags; do
+          echo "IPv6 route: $(ip -6 route 2>&1 | head -2 | tr '\n' ';')"
+          for m in none; do
             echo "########## MODE $m"
             if [ "$m" = "headed" ] || [ "$m" = "headed-flags" ]; then
               MODE=$m xvfb-run -a python debug_open.py || true
