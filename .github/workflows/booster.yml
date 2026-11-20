@@ -33,7 +33,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
+      - name: Debug opening
+        if: ${{ inputs.paths == 'debug-open' }}
+        env:
+          ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
+        run: python debug_open.py
       - name: Inspect my account (read-only)
+        if: ${{ inputs.paths != 'debug-open' }}
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
           INSPECT_PATHS: ${{ inputs.paths }}
