@@ -39,15 +39,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
         run: |
+          sudo -E env PATH="$PATH" playwright install chrome >/dev/null 2>&1 || python -m playwright install chrome 2>&1 | tail -2
+          echo "== SANS tunnel"
+          CLICK_WIDGET=1 MODE=chrome timeout 150 xvfb-run -a python -u debug_open.py || true
+          echo "== AVEC tunnel"
           timeout 150 bash scripts/warp_up.sh || echo "WARP KO"
-          for m in headed-flags; do
-            echo "########## MODE $m"
-            if [ "$m" = "headed-flags" ]; then
-              CLICK_WIDGET=1 MODE=$m timeout 150 xvfb-run -a python -u debug_open.py || true
-            else
-              MODE=$m timeout 150 python -u debug_open.py || true
-            fi
-          done
+          CLICK_WIDGET=1 MODE=chrome timeout 150 xvfb-run -a python -u debug_open.py || true
       - name: Captures
         if: ${{ always() && inputs.paths == 'debug-open' }}
         uses: actions/upload-artifact@v4

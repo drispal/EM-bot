@@ -27,12 +27,16 @@ def main():
         ua_kw = {}
         if mode in ("newheadless", "newheadless-flags"):
             kw["channel"] = "chromium"
+        if mode.startswith("chrome"):
+            kw["channel"] = "chrome"
+            kw["headless"] = False
         if mode == "headed":
             kw["headless"] = False
-        if mode.endswith("flags") or mode == "headed-flags":
+        if mode.endswith("flags") or mode == "headed-flags" or mode.startswith("chrome"):
             args.append("--disable-blink-features=AutomationControlled")
-            ua_kw["user_agent"] = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            if not mode.startswith("chrome"):
+                ua_kw["user_agent"] = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
         browser = p.chromium.launch(args=args, **kw)
         context = browser.new_context(storage_state=state, locale="en-US", **ua_kw)
         page = context.new_page()
