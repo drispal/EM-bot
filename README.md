@@ -43,15 +43,14 @@
 soit disponible ou non (`auctions.py` est un job séparé qui surveille les enchères qui
 se terminent dans les 6 minutes).
 
-- **Doublons** : les COMMON sont recyclées. Les RARE (20 à 30 essecoins) sont mises en
-  vente à prix fixe, un cran sous l'annonce la moins chère. Les EPIC (50 à 62) sont mises
-  au dernier prix de vente (« last sold »), un cran sous l'annonce la moins chère si elle
-  est plus basse, plafonné à 62 (c'est là qu'elles se vendent). Si elles ne sont pas vendues
-  après 120 min (`SELL_TIMEOUT_MIN`), l'annonce est retirée et
-  la carte recyclée. Seules les annonces créées par le bot sont suivies (fichier
-  `sell_state.json`, conservé entre les runs avec `actions/cache`). LEGENDARY et
-  CREATOR ne sont jamais recyclées ni vendues. Une carte dont un exemplaire est déjà en
-  vente ou en échange n'est jamais recyclée.
+- **Doublons** : plus rien n'est mis en vente (pour ne pas fournir les concurrents) :
+  les COMMON, RARE et EPIC en double sont recyclées (+5 / +15 / +40). Seule l'annonce appât
+  de Joss (`link.py`) reste. L'ancienne vente à prix fixe se réactive avec la variable
+  d'environnement `SELL_RARITIES="RARE,EPIC"` ; les annonces déjà créées par le bot sont
+  toujours retirées au bout de 120 min (`SELL_TIMEOUT_MIN`) puis recyclées. Seules les annonces
+  créées par le bot sont suivies (fichier `sell_state.json`, conservé entre les runs avec
+  `actions/cache`). LEGENDARY et CREATOR ne sont jamais recyclées ni vendues. Une carte dont
+  un exemplaire est déjà en vente ou en échange n'est jamais recyclée.
 - **Achat-revente** : une annonce d'une carte que l'on a déjà, à un prix inférieur à sa
   valeur de recyclage (au moins 2 essecoins de gain pour une commune, 3 pour une rare,
   5 pour une épique), est achetée (20 par exécution au maximum) ; le doublon est ensuite recyclé ou mis en vente au passage suivant, comme les autres.
@@ -92,7 +91,7 @@ Variables du dépôt (Settings > Secrets and variables > Actions > Variables) :
 | Variable | Effet |
 |---|---|
 | `MARKET_DRY_RUN` | `false` = recyclage et achats réels, sinon simulation |
-| `MARKET_SELL_DRY_RUN` | `false` en plus = mise en vente réelle des rares (sinon simulée, les rares sont recyclées) |
+| `MARKET_SELL_DRY_RUN` | sans effet tant que `SELL_RARITIES` est vide (plus de vente de doublons) |
 | `MARKET_AUCTION_DRY_RUN` | `false` = mises réelles, sinon simulation |
 | `MARKET_MIN_RATIO` | points par essecoin minimum pour acheter (0,125 par défaut) |
 
