@@ -37,7 +37,25 @@ def main():
         context = browser.new_context(storage_state=state, locale="en-US", **ua_kw)
         page = context.new_page()
         log("UA : " + page.evaluate("navigator.userAgent") + " | webdriver=" + str(page.evaluate("navigator.webdriver")))
-        page.on("console", lambda m: log(f"CONSOLE {m.type}: {m.text[:200]}") if m.type in ("error", "warning") else None)
+        page.on("console", lambda m: log(f"CONSOLE {m.type}: {m.text[:300]}") if (m.type in ("error", "warning") and "font-size:0" not in m.text and "GL Driver" not in m.text) or m.text.startswith("TSMSG") else None)
+        context.add_init_script("""
+          window.addEventListener('message', e => { try { console.log('TSMSG ' + e.origin + ' ' + JSON.stringify(e.data).slice(0,400)); } catch (x) {} });
+          (function wait() {
+            if (window.turnstile && !window.__tsw) {
+              window.__tsw = true;
+              const r = window.turnstile.render;
+              window.turnstile.render = function(el, opts) {
+                console.log('TSMSG render opts=' + JSON.stringify(Object.keys(opts||{})) + ' appearance=' + (opts||{}).appearance + ' execution=' + (opts||{}).execution + ' size=' + (opts||{}).size);
+                const o = Object.assign({}, opts);
+                for (const k of ['callback','error-callback','expired-callback','timeout-callback','before-interactive-callback','unsupported-callback']) {
+                  if (typeof opts[k] === 'function') { const f = opts[k]; o[k] = function() { console.log('TSMSG cb ' + k + ' ' + JSON.stringify([].slice.call(arguments)).slice(0,200)); return f.apply(this, arguments); }; }
+                }
+                return r.call(this, el, o);
+              };
+            }
+            setTimeout(wait, 20);
+          })();
+        """)
         page.on("pageerror", lambda e: log(f"PAGEERROR {str(e)[:200]}"))
         page.on("requestfailed", lambda r: log(f"REQFAILED {r.method} {r.url[:120]} {r.failure}"))
 
