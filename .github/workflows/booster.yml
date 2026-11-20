@@ -36,19 +36,13 @@ jobs:
       - name: Debug opening
         if: ${{ inputs.paths == 'debug-open' }}
         env:
+          GH_TOKEN: ${{ github.token }}
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
         run: |
-          for h in brunhild.challenges.cloudflare.com hagen.challenges.cloudflare.com challenges.cloudflare.com; do
-            echo "== $h"
-            echo "A    : $(getent ahostsv4 $h | awk '{print $1}' | sort -u | tr '\n' ' ')"
-            echo "AAAA : $(getent ahostsv6 $h | awk '{print $1}' | sort -u | tr '\n' ' ')"
-            echo "curl -4: $(curl -4 -s -o /dev/null -m 8 -w '%{http_code}' https://$h/ 2>&1) | curl -6: $(curl -6 -s -o /dev/null -m 8 -w '%{http_code}' https://$h/ 2>&1)"
-            echo "curl -4 -v: $(curl -4 -sv -o /dev/null -m 8 https://$h/ 2>&1 | grep -E 'Connected|timed|refused|SSL|HTTP/' | head -3 | tr '\n' ';')"
-          done
-          echo "IPv6 route: $(ip -6 route 2>&1 | head -2 | tr '\n' ';')"
-          for m in none; do
+          bash scripts/warp_up.sh || echo "WARP KO"
+          for m in headless headed-flags; do
             echo "########## MODE $m"
-            if [ "$m" = "headed" ] || [ "$m" = "headed-flags" ]; then
+            if [ "$m" = "headed-flags" ]; then
               MODE=$m xvfb-run -a python debug_open.py || true
             else
               MODE=$m python debug_open.py || true
