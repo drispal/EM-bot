@@ -1,5 +1,10 @@
 name: Setup Python and Playwright
 description: Python, Playwright and Chromium (browser cached between runs)
+inputs:
+  chrome:
+    description: "Installer aussi Google Chrome (ouverture des boosters : contrôle Turnstile)"
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
@@ -47,3 +52,12 @@ runs:
         sudo cp -n /var/cache/apt/archives/*.deb ~/apt-debs/ 2>/dev/null || true
         sudo chown -R "$USER" ~/apt-debs 2>/dev/null || true
         echo "apt : $(ls ~/apt-debs | wc -l) paquet(s) conservés"
+
+    # Le contrôle anti-robot du site (Cloudflare Turnstile) n'aboutit qu'avec un vrai Chrome,
+    # affiché (sous écran virtuel xvfb) : Chromium headless est refusé.
+    - name: Install Google Chrome
+      if: ${{ inputs.chrome == 'true' }}
+      shell: bash
+      run: |
+        sudo -E env "PATH=$PATH" playwright install chrome || python -m playwright install chrome
+        sudo apt-get install -y -qq xvfb >/dev/null 2>&1 || true
