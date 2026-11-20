@@ -39,6 +39,7 @@ def main():
         log("UA : " + page.evaluate("navigator.userAgent") + " | webdriver=" + str(page.evaluate("navigator.webdriver")))
         page.on("console", lambda m: log(f"CONSOLE {m.type}: {m.text[:300]}") if (m.type in ("error", "warning") and "font-size:0" not in m.text and "GL Driver" not in m.text) or m.text.startswith("TSMSG") else None)
         context.add_init_script("""
+          if (window.top === window) {
           window.addEventListener('message', e => { try { console.log('TSMSG ' + e.origin + ' ' + JSON.stringify(e.data).slice(0,400)); } catch (x) {} });
           (function wait() {
             if (window.turnstile && !window.__tsw) {
@@ -53,8 +54,9 @@ def main():
                 return r.call(this, el, o);
               };
             }
-            setTimeout(wait, 20);
+            if (!window.__tsw) setTimeout(wait, 50);
           })();
+          }
         """)
         page.on("pageerror", lambda e: log(f"PAGEERROR {str(e)[:200]}"))
         page.on("requestfailed", lambda r: log(f"REQFAILED {r.method} {r.url[:120]} {r.failure}"))

@@ -39,13 +39,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
         run: |
-          bash scripts/warp_up.sh || echo "WARP KO"
+          timeout 150 bash scripts/warp_up.sh || echo "WARP KO"
           for m in headless headed-flags; do
             echo "########## MODE $m"
             if [ "$m" = "headed-flags" ]; then
-              MODE=$m xvfb-run -a python debug_open.py || true
+              MODE=$m timeout 150 xvfb-run -a python -u debug_open.py || true
             else
-              MODE=$m python debug_open.py || true
+              MODE=$m timeout 150 python -u debug_open.py || true
             fi
           done
       - name: Captures
