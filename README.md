@@ -103,6 +103,17 @@ toucher aux variables.
   bouton « Show more listings » reste absent et que le nombre d'annonces n'est pas un multiple
   de 24 ; sinon attente de 4 s puis un seul rechargement.
 
+## Sniper (cartes manquantes)
+
+`sniper.py` (workflow `sniper.yml`, lancé uniquement par `workflow_dispatch`) achète une carte qui me
+manque quelques secondes après sa mise en vente. Un run reste vivant 5 h 35 : toutes les ~10 s il lit les
+24 à 48 annonces les plus récentes de chaque rareté (tri « Newest ») et achète toute annonce « New for you »
+(solde seul limite, plafond de sécurité `SNIPER_COINS_PER_PT` = 500 essecoins par point ; 0 = aucun). Avant
+le clic il revérifie l'annonce, après il vérifie qu'elle a disparu. Un cron externe (cron-job.org) appelle l'API
+`POST /repos/drispal/EM-bot/actions/workflows/sniper.yml/dispatches` avec `{"ref":"main"}` : le groupe de
+concurrence garde un run actif et un en attente, les lancements en trop sont remplacés.
+Interrupteur : `SNIPER_DRY_RUN` (sinon `MARKET_DRY_RUN`). Test : `-f test_buy=1` achète une commune déjà possédée (≤ 10).
+
 ## Compte nourrisseur (Joss)
 
 Un second compte (Joss) ouvre des boosters et alimente le compte principal. Tout est désactivé
