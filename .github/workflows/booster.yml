@@ -37,7 +37,15 @@ jobs:
         if: ${{ inputs.paths == 'debug-open' }}
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
-        run: python debug_open.py
+        run: |
+          for m in headless newheadless headed headless-flags newheadless-flags headed-flags; do
+            echo "########## MODE $m"
+            if [ "$m" = "headed" ] || [ "$m" = "headed-flags" ]; then
+              MODE=$m xvfb-run -a python debug_open.py || true
+            else
+              MODE=$m python debug_open.py || true
+            fi
+          done
       - name: Inspect my account (read-only)
         if: ${{ inputs.paths != 'debug-open' }}
         env:

@@ -20,9 +20,23 @@ def log(msg):
 def main():
     state = json.loads(os.environ["ESSEC_STORAGE_STATE"])
     with sync_playwright() as p:
-        browser = p.chromium.launch()
-        context = browser.new_context(storage_state=state, locale="en-US")
+        mode = os.environ.get("MODE", "headless")
+        log(f"MODE = {mode}")
+        args = []
+        kw = {}
+        ua_kw = {}
+        if mode in ("newheadless", "newheadless-flags"):
+            kw["channel"] = "chromium"
+        if mode == "headed":
+            kw["headless"] = False
+        if mode.endswith("flags") or mode == "headed-flags":
+            args.append("--disable-blink-features=AutomationControlled")
+            ua_kw["user_agent"] = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+        browser = p.chromium.launch(args=args, **kw)
+        context = browser.new_context(storage_state=state, locale="en-US", **ua_kw)
         page = context.new_page()
+        log("UA : " + page.evaluate("navigator.userAgent") + " | webdriver=" + str(page.evaluate("navigator.webdriver")))
         page.on("console", lambda m: log(f"CONSOLE {m.type}: {m.text[:200]}") if m.type in ("error", "warning") else None)
         page.on("pageerror", lambda e: log(f"PAGEERROR {str(e)[:200]}"))
         page.on("requestfailed", lambda r: log(f"REQFAILED {r.method} {r.url[:120]} {r.failure}"))
@@ -57,14 +71,19 @@ def main():
             page.wait_for_timeout(int((t - (time.time() - T0 - 0)) * 0) + 0)
             time.sleep(max(0, t - 0) if False else 0)
         marks = [1, 3, 6, 12, 20, 35]
+        ok = False
         t_click = time.time()
         for m in marks:
             while time.time() - t_click < m:
                 page.wait_for_timeout(250)
             txt = page.locator("main").inner_text()[:260].replace("\n", " | ")
             log(f"{m}s après le clic : {txt}")
+            if re.search(r"Next card|Click the card to reveal|Your booster", page.locator("main").inner_text()) or page.locator('button[aria-label="Reveal the card"]').count():
+                log("RESULTAT : ECRAN DES CARTES ATTEINT")
+                ok = True
+                break
             log("   boutons : " + str([b.inner_text().strip()[:30] for b in page.get_by_role("button").all()][:10]))
-        log("iframes : " + str([f.url[:80] for f in page.frames]))
+        log("RESULTAT : " + ("OK" if ok else "ECHEC (reste sur Opening)"))
         OB.load(page)
         log("après rechargement : " + page.locator("main").inner_text()[:200].replace("\n", " | "))
         browser.close()
