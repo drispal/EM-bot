@@ -71,10 +71,15 @@ def load(page, rarity):
         pass  # aucune annonce de cette rareté, ou chargement lent
 
 
+IDS_JS = r"""() => [...document.querySelectorAll("main form")]
+  .filter(f => f.querySelector("input[name='listingId']")
+    && [...f.querySelectorAll('button')].some(b => b.innerText.trim() === 'Buy'))
+  .map(f => f.querySelector("input[name='listingId']").value)"""
+
+
 def listing_ids(page):
     """Identifiants d'annonce, dans le même ordre que M.collect_listings (formulaires « Buy »)."""
-    return page.evaluate("""(sel) => [...document.querySelectorAll(sel)]
-        .map(f => (f.querySelector("input[name='listingId']") || {}).value || '')""", M.BUY_FORMS)
+    return page.evaluate(IDS_JS)
 
 
 def read_newest(page, rarity):
