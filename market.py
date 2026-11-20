@@ -5,10 +5,10 @@
    concernées ; LEGENDARY et CREATOR ne sont jamais recyclées ni vendues (sauf sur le compte
    nourrisseur Joss, qui recycle tous ses doublons). Une carte qui
    a déjà un exemplaire en vente ou en échange n'est pas recyclée.
-   - COMMON : recyclées (5 essecoins).
-   - RARE et EPIC : mises en vente à prix fixe (bien plus que les 15 / 40 du recyclage) ;
-     si la carte n'est pas vendue après SELL_TIMEOUT_MIN minutes, l'annonce est retirée
-     puis la carte recyclée. Le script ne touche JAMAIS aux annonces qu'il n'a pas créées
+   - COMMON, RARE, EPIC : toutes recyclées (5 / 15 / 40 essecoins). Le script ne met plus rien
+     en vente (pour ne pas fournir les concurrents), à part l'annonce appât de link.py pour Joss.
+     Option : SELL_RARITIES="RARE,EPIC" remet la vente à prix fixe (retrait et recyclage après
+     SELL_TIMEOUT_MIN minutes). Le script ne touche JAMAIS aux annonces qu'il n'a pas créées
      lui-même (la liste est gardée dans sell_state.json).
 2. Achat-revente : une annonce d'une carte que l'on possède déjà, vendue bien en dessous
    de sa valeur de recyclage, est achetée ; l'exemplaire en double suit ensuite le circuit
@@ -144,7 +144,9 @@ FLIP_LIMIT = {r: RECYCLE_VALUE[r] - FLIP_MIN_PROFIT[r] for r in RECYCLE_VALUE}
 MAX_FLIPS = 20  # garde-fou par exécution
 
 # --- ventes de doublons ----------------------------------------------------------
-SELL_RARITIES = set() if FEEDER else {"RARE", "EPIC"}  # Joss ne met rien en vente : il recycle
+# Plus aucune mise en vente de doublons : tout est recyclé (seule l'annonce appât de link.py reste).
+# Pour revendre des rares / épiques : variable SELL_RARITIES="RARE,EPIC" (jamais pour Joss).
+SELL_RARITIES = set() if FEEDER else {r.strip().upper() for r in os.environ.get("SELL_RARITIES", "").split(",") if r.strip()}
 # (prix minimum, prix maximum, prix par défaut) en essecoins ; le recyclage rapporte 15 / 40
 SELL_BOUNDS = {"RARE": (20, 30, 26), "EPIC": (50, 62, 60)}
 SELL_TIMEOUT_MIN = int(os.environ.get("SELL_TIMEOUT_MIN", "120"))
