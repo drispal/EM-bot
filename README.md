@@ -112,6 +112,9 @@ manque quelques secondes après sa mise en vente. Un run reste vivant 5 h 35 : t
 le clic il revérifie l'annonce, après il vérifie qu'elle a disparu. Un cron externe (cron-job.org) appelle l'API
 `POST /repos/drispal/EM-bot/actions/workflows/sniper.yml/dispatches` avec `{"ref":"main"}` : le groupe de
 concurrence garde un run actif et un en attente, les lancements en trop sont remplacés.
+Toutes les `SNIPER_SWEEP_MINUTES` minutes (60 par défaut) le sniper fait aussi un balayage : il lit dans l'album la liste
+exacte des cartes manquantes (« Not packed yet ») et cherche chacune par son nom au marché, quel que soit son prix
+(plafond de sécurité compris), pour rattraper ce que la lecture des annonces récentes aurait raté (≈ 3 min par balayage).
 Interrupteur : `SNIPER_DRY_RUN` (sinon `MARKET_DRY_RUN`). Test : `-f test_buy=1` achète une commune déjà possédée (≤ 10).
 
 ## Compte nourrisseur (Joss)
