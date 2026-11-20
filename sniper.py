@@ -9,6 +9,12 @@ tout le marché. Les enchères restent gérées par auctions.py.
 Un run reste vivant SNIPER_MINUTES minutes (5 h 35 par défaut) ; le cron externe relance
 un run quand le précédent est fini (le groupe de concurrence met le suivant en attente).
 
+Filet de sécurité (« balayage ») : au démarrage puis toutes les SNIPER_SWEEP_MINUTES minutes
+(60 par défaut), le sniper lit dans l'album la liste exacte des cartes qui me manquent (les cartes
+grisées, « Not packed yet ») et cherche chacune par son nom au marché, à n'importe quel prix (dans
+la limite du plafond de sécurité). Il rattrape ce que la lecture des annonces récentes rate : carte
+listée trop chère pour mon solde de l'époque, listée entre deux runs, tour en erreur.
+
 Garde-fous : jamais plus que le solde ; prix maximum SNIPER_COINS_PER_PT essecoins par point
 (500 : commune 500, rare 1 500, épique 4 000, légendaire 10 000 ; 0 = aucun plafond) ;
 une même carte n'est pas rachetée pendant 10 minutes ; arrêt si la session a expiré.
@@ -16,6 +22,7 @@ une même carte n'est pas rachetée pendant 10 minutes ; arrêt si la session a 
 Interrupteur : SNIPER_DRY_RUN ("false" pour acheter pour de vrai, sinon simulation).
 """
 import os
+import re
 import sys
 import time
 from collections import Counter
@@ -32,6 +39,7 @@ COINS_PER_PT = int(os.environ.get("SNIPER_COINS_PER_PT", "500"))   # 0 = aucun p
 RESERVE = int(os.environ.get("SNIPER_RESERVE", "0"))               # essecoins jamais dépensés
 RARITIES = ("legendary", "epic", "rare", "common")                 # les plus lourdes en points d'abord
 TEST_BUY = os.environ.get("SNIPER_TEST_BUY", "") == "1"                # test : un seul achat d'une commune déjà possédée
+SWEEP_MINUTES = float(os.environ.get("SNIPER_SWEEP_MINUTES", "60"))  # 0 = pas de balayage
 RECENT = 10 * 60                                                   # pas de rachat de la même carte
 MAX_ERRORS = 5                                                     # erreurs de suite avant de relancer la page
 
@@ -102,7 +110,7 @@ def limit_for(rarity, budget):
     return min(budget - RESERVE, cap)
 
 
-def buy(page, rarity, cand, budget, require_new=True):
+def buy(page, rarity, cand, budget, require_new=True, reload=None):
     """Achète l'annonce `cand` ; renvoie le prix payé ou None. La page est relue juste avant le
     clic : l'ordre des annonces peut avoir bougé (une nouvelle annonce décale tout)."""
     name, price, lid = cand["name"], cand["price"], cand["lid"]
@@ -130,7 +138,7 @@ def buy(page, rarity, cand, budget, require_new=True):
     M.settle(page)
     bought[name] = time.time()
     # vérification : l'annonce doit avoir disparu du marché une fois achetée
-    load(page, rarity)
+    (reload or (lambda: load(page, rarity)))()
     if lid in listing_ids(page):
         log(f"⚠ {rarity.upper()} « {name} » à {price} : l'annonce est toujours là après le clic (achat refusé ?).")
         stats["missed"] += 1
@@ -138,6 +146,90 @@ def buy(page, rarity, cand, budget, require_new=True):
     log(f"ACHETÉ {rarity.upper()} « {name} » à {price} essecoins ({pts} pt).")
     stats["bought"] += 1
     return price
+
+
+ALBUM_RARITIES = ("legendary", "epic", "rare", "common")
+RARITY_WORDS = {"COMMON", "RARE", "EPIC", "LEGENDARY", "CREATOR"}
+
+
+def parse_missing(text):
+    """(nombre annoncé, [(rareté, nom), ...]) d'après la section « Not packed yet (N) » de l'album."""
+    m = re.search(r"Not packed yet \((\d+)\)", text)
+    if not m:
+        return None, []
+    lines = [x.strip() for x in text[m.end():].split("\n") if x.strip()]
+    out = []
+    for i, x in enumerate(lines):
+        if x == "?" and i + 2 < len(lines) and lines[i + 1] in RARITY_WORDS:
+            out.append((lines[i + 1].lower(), lines[i + 2]))
+    return int(m.group(1)), out
+
+
+def album_missing(page):
+    """Cartes qui me manquent, lues dans l'album (une page par rareté, défilement jusqu'en bas
+    car la liste se charge par morceaux)."""
+    result, problems = [], []
+    for rarity in ALBUM_RARITIES:
+        page.goto(f"{M.BASE}/album?f={rarity}", wait_until="domcontentloaded", timeout=30000)
+        if "/login" in page.url:
+            log("Session expirée.")
+            write_summary()
+            sys.exit("Session expirée.")
+        expected, items, last_h, still = None, [], -1, 0
+        for _ in range(90):
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(500)
+            expected, items = parse_missing(page.evaluate("document.body.innerText"))
+            if expected is not None and len(items) >= expected:
+                break
+            h = page.evaluate("document.body.scrollHeight")
+            still = still + 1 if h == last_h else 0
+            last_h = h
+            if still >= 6:  # plus rien ne se charge
+                break
+        if expected is not None and len(items) < expected:
+            problems.append(f"{rarity} : {len(items)} nom(s) lus sur {expected}")
+        result += [(r, n) for r, n in items if r == rarity]
+    return result, problems
+
+
+def load_search(page, rarity, name):
+    page.goto(f"{M.BASE}{M.market_path(rarity, name)}", wait_until="domcontentloaded", timeout=30000)
+    try:
+        page.wait_for_selector(M.BUY_FORMS, timeout=5000)
+    except PlaywrightError:
+        pass  # aucune annonce pour ce nom
+
+
+def sweep(page):
+    """Cherche au marché, par son nom, chaque carte qui me manque ; achète l'annonce la moins chère."""
+    missing, problems = album_missing(page)
+    per = Counter(r for r, _ in missing)
+    log(f"Balayage : {len(missing)} carte(s) manquante(s) lue(s) dans l'album "
+        f"({', '.join(f'{per[r]} {r}' for r in ALBUM_RARITIES if per[r])}).")
+    for p in problems:
+        log(f"⚠ Lecture de l'album incomplète : {p}")
+    budget = None
+    found = 0
+    for rarity, name in missing:
+        load_search(page, rarity, name)
+        if budget is None:
+            budget = M.balance(page) or 0
+        listings = [x for x in M.collect_listings(page) if x["name"] == name and x["is_new"]]
+        ids = listing_ids(page)
+        for x in listings:
+            x["lid"] = ids[x["idx"]] if x["idx"] < len(ids) else ""
+        if not listings:
+            continue
+        found += 1
+        stats["seen_new"] += 1
+        cand = min(listings, key=lambda x: x["price"])
+        log(f"Balayage : {rarity.upper()} « {name} » en vente à {cand['price']} essecoins.")
+        paid = buy(page, rarity, cand, budget, reload=lambda: load_search(page, rarity, name))
+        if paid is not None:
+            budget -= paid
+    stats["sweeps"] += 1
+    log(f"Balayage terminé : {found} carte(s) manquante(s) trouvée(s) au marché sur {len(missing)}.")
 
 
 def one_round(page):
@@ -178,7 +270,8 @@ def main():
     import json
     deadline = time.time() + MINUTES * 60
     log(f"Démarrage : {'SIMULATION' if DRY_RUN else 'ACHATS RÉELS'}, {MINUTES:.0f} min, "
-        f"pause {POLL_S:.0f} s, {PAGES} page(s) par rareté, plafond {COINS_PER_PT or 'aucun'} essecoins/pt.")
+        f"pause {POLL_S:.0f} s, {PAGES} page(s) par rareté, plafond {COINS_PER_PT or 'aucun'} essecoins/pt, "
+        f"balayage toutes les {SWEEP_MINUTES:.0f} min.")
     with sync_playwright() as p:
         browser = p.chromium.launch()
         context = browser.new_context(storage_state=json.loads(raw), locale="en-US",
@@ -189,10 +282,14 @@ def main():
         page = context.new_page()
         page.on("dialog", lambda d: d.accept())
         errors = 0
+        next_sweep = time.time() if SWEEP_MINUTES > 0 else float("inf")
         try:
             while time.time() < deadline:
                 t0 = time.time()
                 try:
+                    if time.time() >= next_sweep:
+                        next_sweep = time.time() + SWEEP_MINUTES * 60
+                        sweep(page)
                     one_round(page)
                     errors = 0
                 except SystemExit:
