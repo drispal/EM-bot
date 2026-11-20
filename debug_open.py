@@ -71,6 +71,19 @@ def main():
             page.wait_for_timeout(int((t - (time.time() - T0 - 0)) * 0) + 0)
             time.sleep(max(0, t - 0) if False else 0)
         marks = [1, 3, 6, 12, 20, 35]
+        def snap(tag):
+            try:
+                page.screenshot(path=f"/tmp/shot-{mode}-{tag}.png", full_page=True)
+            except Exception as e:  # noqa: BLE001
+                log(f"screenshot KO {e}")
+            for f in page.frames:
+                if "cloudflare" in f.url:
+                    try:
+                        log(f"   IFRAME {f.url[:70]} texte={f.locator('body').inner_text(timeout=1500)[:200]!r}")
+                    except Exception as e:  # noqa: BLE001
+                        log(f"   IFRAME {f.url[:70]} texte illisible: {str(e)[:80]}")
+            log("   widgets turnstile : " + str(page.evaluate("""() => [...document.querySelectorAll('[class*=turnstile],[id*=turnstile],iframe')].map(e => e.tagName+'#'+(e.id||'')+'.'+(e.className||'')+' '+JSON.stringify(e.getBoundingClientRect()))""")))
+        snap("t0")
         ok = False
         t_click = time.time()
         for m in marks:
@@ -78,6 +91,8 @@ def main():
                 page.wait_for_timeout(250)
             txt = page.locator("main").inner_text()[:260].replace("\n", " | ")
             log(f"{m}s après le clic : {txt}")
+            if m in (3, 20):
+                snap(f"t{m}")
             if re.search(r"Next card|Click the card to reveal|Your booster", page.locator("main").inner_text()) or page.locator('button[aria-label="Reveal the card"]').count():
                 log("RESULTAT : ECRAN DES CARTES ATTEINT")
                 ok = True

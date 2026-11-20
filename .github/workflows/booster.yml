@@ -38,7 +38,10 @@ jobs:
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
         run: |
-          for m in headless newheadless headed headless-flags newheadless-flags headed-flags; do
+          for h in brunhild.challenges.cloudflare.com hagen.challenges.cloudflare.com challenges.cloudflare.com www.essecmasters.com; do
+            echo "DNS $h -> $(getent hosts $h | head -1 || echo ECHEC) | curl: $(curl -s -o /dev/null -m 8 -w '%{http_code}' https://$h/ || echo ECHEC)"
+          done
+          for m in headless headed-flags; do
             echo "########## MODE $m"
             if [ "$m" = "headed" ] || [ "$m" = "headed-flags" ]; then
               MODE=$m xvfb-run -a python debug_open.py || true
@@ -46,6 +49,12 @@ jobs:
               MODE=$m python debug_open.py || true
             fi
           done
+      - name: Captures
+        if: ${{ always() && inputs.paths == 'debug-open' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots
+          path: /tmp/shot-*.png
       - name: Inspect my account (read-only)
         if: ${{ inputs.paths != 'debug-open' }}
         env:
