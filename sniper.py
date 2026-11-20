@@ -31,6 +31,7 @@ PAGES = max(1, int(os.environ.get("SNIPER_PAGES", "2")))           # pages de 24
 COINS_PER_PT = int(os.environ.get("SNIPER_COINS_PER_PT", "500"))   # 0 = aucun plafond
 RESERVE = int(os.environ.get("SNIPER_RESERVE", "0"))               # essecoins jamais dépensés
 RARITIES = ("legendary", "epic", "rare", "common")                 # les plus lourdes en points d'abord
+TEST_BUY = os.environ.get("SNIPER_TEST_BUY", "") == "1"                # test : un seul achat d'une commune déjà possédée
 RECENT = 10 * 60                                                   # pas de rachat de la même carte
 MAX_ERRORS = 5                                                     # erreurs de suite avant de relancer la page
 
@@ -71,10 +72,15 @@ def load(page, rarity):
         pass  # aucune annonce de cette rareté, ou chargement lent
 
 
+IDS_JS = r"""() => [...document.querySelectorAll("main form")]
+  .filter(f => f.querySelector("input[name='listingId']")
+    && [...f.querySelectorAll('button')].some(b => b.innerText.trim() === 'Buy'))
+  .map(f => f.querySelector("input[name='listingId']").value)"""
+
+
 def listing_ids(page):
     """Identifiants d'annonce, dans le même ordre que M.collect_listings (formulaires « Buy »)."""
-    return page.evaluate("""(sel) => [...document.querySelectorAll(sel)]
-        .map(f => (f.querySelector("input[name='listingId']") || {}).value || '')""", M.BUY_FORMS)
+    return page.evaluate(IDS_JS)
 
 
 def read_newest(page, rarity):
@@ -96,7 +102,7 @@ def limit_for(rarity, budget):
     return min(budget - RESERVE, cap)
 
 
-def buy(page, rarity, cand, budget):
+def buy(page, rarity, cand, budget, require_new=True):
     """Achète l'annonce `cand` ; renvoie le prix payé ou None. La page est relue juste avant le
     clic : l'ordre des annonces peut avoir bougé (une nouvelle annonce décale tout)."""
     name, price, lid = cand["name"], cand["price"], cand["lid"]
@@ -112,7 +118,8 @@ def buy(page, rarity, cand, budget):
         log(f"[SIMULATION] Acheter {rarity.upper()} « {name} » à {price} essecoins ({pts} pt).")
         bought[name] = time.time()
         return price
-    cur = [x for x in M.collect_listings(page) if x["name"] == name and x["is_new"] and x["price"] <= lim]
+    cur = [x for x in M.collect_listings(page)
+           if x["name"] == name and (x["is_new"] or not require_new) and x["price"] <= lim]
     ids = listing_ids(page)
     cur = [x for x in cur if x["idx"] < len(ids) and ids[x["idx"]] == lid]
     if not cur:
@@ -142,6 +149,15 @@ def one_round(page):
         if stats["rounds"] == 0:  # premier tour : permet de contrôler le tri et la lecture dans le journal
             head = ", ".join(f"{l['price']}{'*' if l['is_new'] else ''}" for l in listings[:8])
             log(f"Lecture {rarity} : {len(listings)} annonce(s), prix des plus récentes (* = me manque) : {head}")
+        if TEST_BUY and rarity == "common" and not stats["test_done"]:
+            owned = sorted((l for l in listings if not l["is_new"] and l["name"] and l["price"] <= 10),
+                           key=lambda l: l["price"])
+            if owned:
+                stats["test_done"] += 1
+                log(f"TEST : achat d'une commune déjà possédée ({owned[0]['name']}, {owned[0]['price']}).")
+                paid = buy(page, rarity, owned[0], budget, require_new=False)
+                if paid is not None:
+                    budget -= paid
         new = sorted((l for l in listings if l["is_new"] and l["name"]), key=lambda l: l["price"])
         done = set()
         for cand in new:

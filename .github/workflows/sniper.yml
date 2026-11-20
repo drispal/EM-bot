@@ -8,7 +8,11 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: '"true" = simulation, "false" = achats réels, vide = variable SNIPER_DRY_RUN'
+        description: '"true" = simulation, "false" = achats réels, vide = variable SNIPER_DRY_RUN puis MARKET_DRY_RUN'
+        required: false
+        default: ""
+      test_buy:
+        description: '"1" = test : achète UNE commune déjà possédée (≤ 10 essecoins) pour vérifier le clic'
         required: false
         default: ""
       minutes:
@@ -31,8 +35,9 @@ jobs:
       - name: Sniper
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
-          # Simulation tant que la variable SNIPER_DRY_RUN n'est pas "false"
-          SNIPER_DRY_RUN: ${{ inputs.dry_run || vars.SNIPER_DRY_RUN || 'true' }}
+          # Achats réels dès que MARKET_DRY_RUN vaut "false" (variable SNIPER_DRY_RUN pour décider à part)
+          SNIPER_DRY_RUN: ${{ inputs.dry_run || vars.SNIPER_DRY_RUN || vars.MARKET_DRY_RUN || 'true' }}
           SNIPER_MINUTES: ${{ inputs.minutes || '335' }}
+          SNIPER_TEST_BUY: ${{ inputs.test_buy }}
           SNIPER_COINS_PER_PT: ${{ vars.SNIPER_COINS_PER_PT || '500' }}
         run: python sniper.py
