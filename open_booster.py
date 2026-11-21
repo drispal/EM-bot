@@ -114,6 +114,19 @@ def load(page, url=None):
         pass
 
 
+def wait_booster_ui(page, timeout_ms=20000):
+    """Attend que la zone du booster soit affichée (bouton ou minuteur). Chrome affiché est plus
+    lent que Chromium headless et la page s'hydrate après le chargement."""
+    try:
+        page.wait_for_function(
+            """() => /next booster in\\s*\\d+:\\d+/i.test(document.body.innerText)
+                  || [...document.querySelectorAll('button')].some(b => /open the booster/i.test(b.innerText + ' ' + (b.getAttribute('aria-label') || '')))""",
+            timeout=timeout_ms,
+        )
+    except PlaywrightError:
+        print("Zone du booster non affichée : " + page.locator("main").inner_text()[:200].replace("\n", " | "))
+
+
 def collection_count(page):
     m = re.search(r"Collection:\s*(\d+)\s*/\s*(\d+)", page.inner_text("body"))
     return (int(m.group(1)), int(m.group(2))) if m else None
@@ -213,6 +226,7 @@ def main():
             summary("## Échec\nSession expirée : relance `login_local.py` et mets à jour le secret.")
             sys.exit("Session expirée : relance login_local.py et mets à jour le secret.")
 
+        wait_booster_ui(page)
         before = collection_count(page)
         button = page.get_by_role("button", name="Open the booster")
         page.wait_for_timeout(1000)
@@ -223,6 +237,7 @@ def main():
                 print(f"Booster dans {remaining}s : j'attends.")
                 page.wait_for_timeout((remaining + 5) * 1000)
                 load(page)
+                wait_booster_ui(page)
                 page.wait_for_timeout(1000)
                 before = collection_count(page)
                 button = page.get_by_role("button", name="Open the booster")
