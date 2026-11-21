@@ -124,7 +124,11 @@ def wait_booster_ui(page, timeout_ms=20000):
             timeout=timeout_ms,
         )
     except PlaywrightError:
-        print("Zone du booster non affichée : " + page.locator("main").inner_text()[:200].replace("\n", " | "))
+        try:
+            txt = page.locator("body").inner_text(timeout=3000)[:300].replace("\n", " | ")
+        except PlaywrightError:
+            txt = "(corps illisible)"
+        print(f"Zone du booster non affichée : url={page.url} titre={page.title()!r} texte={txt}")
 
 
 def collection_count(page):
