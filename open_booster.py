@@ -11,12 +11,78 @@ import json
 import os
 import re
 import sys
+import time
 
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 HOME_URL = "https://www.essecmasters.com/home"
 MAX_WAIT_SECONDS = 330  # attend le booster s'il arrive dans moins de 5 min 30
 END_MARKERS = r"Click the card to reveal it|Next card|Your booster|NEXT BOOSTER IN|See my collection"
+
+
+# Contrôle anti-robot du site : Cloudflare Turnstile (mode « managed »). Il exige un vrai Chrome
+# affiché et, pour ce client, une case à cocher que l'on clique comme un utilisateur.
+BROWSER_ARGS = ["--disable-blink-features=AutomationControlled"]
+TS_JS = """
+if (window.top === window) {
+  window.__ev = [];
+  window.addEventListener('message', e => {
+    try { if (e.data && e.data.source === 'cloudflare-challenge' && e.data.event !== 'food') window.__ev.push(e.data.event); } catch (x) {}
+  });
+}
+"""
+CARDS_JS = """() => {
+    const t = document.body.innerText;
+    return t.includes('Next card') || t.includes('Click the card to reveal it')
+        || t.includes('Your booster')
+        || !!document.querySelector('button[aria-label="Reveal the card"]');
+}"""
+
+
+def launch(p):
+    """Google Chrome affiché (sous xvfb dans GitHub Actions) ; repli sur Chromium headless."""
+    try:
+        return p.chromium.launch(channel="chrome", headless=False, args=BROWSER_ARGS)
+    except PlaywrightError as exc:
+        print(f"Chrome indisponible ({str(exc)[:80]}) : repli sur Chromium headless.")
+        return p.chromium.launch(args=BROWSER_ARGS)
+
+
+def pass_turnstile(page, timeout_s=45):
+    """Attend l'écran des cartes ; si Turnstile demande une interaction, clique sa case
+    comme le ferait l'utilisateur (déplacement de souris puis clic). 3 essais au plus."""
+    start = time.time()
+    seen = clicks = 0
+    while time.time() - start < timeout_s:
+        try:
+            if page.evaluate(CARDS_JS):
+                return True
+            events = page.evaluate("window.__ev || []")
+        except PlaywrightError:
+            page.wait_for_timeout(500)
+            continue
+        begins = events.count("interactiveBegin")
+        if begins > seen and clicks < 3:
+            seen = begins
+            for frame in page.frames:
+                if "challenges.cloudflare.com" not in frame.url:
+                    continue
+                try:
+                    box = frame.frame_element().bounding_box()
+                except PlaywrightError:
+                    continue
+                if box and box["width"] > 20 and box["height"] > 20:
+                    x, y = box["x"] + 28, box["y"] + box["height"] / 2
+                    page.mouse.move(x - 120, y - 40, steps=12)
+                    page.wait_for_timeout(400)
+                    page.mouse.move(x, y, steps=18)
+                    page.wait_for_timeout(300)
+                    page.mouse.click(x, y)
+                    clicks += 1
+                    print(f"Vérification Cloudflare : clic sur la case ({clicks}).")
+                    break
+        page.wait_for_timeout(400)
+    return False
 
 
 def summary(text):
@@ -137,8 +203,9 @@ def main():
     state = json.loads(raw)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = launch(p)
         context = browser.new_context(storage_state=state, locale="en-US")
+        context.add_init_script(TS_JS)
         page = context.new_page()
         load(page, HOME_URL)
 
@@ -174,7 +241,8 @@ def main():
             with open(out, "a", encoding="utf-8") as f:
                 f.write("opened=true\n")
         try:
-            wait_for_cards(page)
+            if not pass_turnstile(page):
+                raise TimeoutError("écran des cartes absent")
         except Exception:  # noqa: BLE001
             print("Écran des cartes non détecté ; état de la page :")
             print(page.locator("main").inner_text()[:300].replace("\n", " | "))

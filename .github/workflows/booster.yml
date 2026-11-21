@@ -25,12 +25,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: ./.github/actions/setup
+        with:
+          chrome: "true"
 
       - name: Open booster
         id: booster
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE }}
-        run: python open_booster.py
+        run: xvfb-run -a python -u open_booster.py
 
       - name: Tracking branch
         continue-on-error: true
@@ -158,6 +160,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: ./.github/actions/setup
+        with:
+          chrome: "true"
 
       - name: Tracking branch
         continue-on-error: true
@@ -166,7 +170,7 @@ jobs:
       - name: Open booster (Joss)
         env:
           ESSEC_STORAGE_STATE: ${{ secrets.ESSEC_STORAGE_STATE_JOSS }}
-        run: python open_booster.py
+        run: xvfb-run -a python -u open_booster.py
 
       - name: Restore sell state (Joss)
         if: ${{ !cancelled() }}
